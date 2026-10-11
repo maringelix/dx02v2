@@ -1,0 +1,136 @@
+# AKS (tx02v2, contract v1). Namespace-scoped resources only: the dx02v2 namespace, the
+# ClusterSecretStore, the ALB Controller, Application Gateway for Containers and the deployer RBAC
+# belong to tx02v2. Values read from App Configuration at deploy time (images, AGC ID and frontend,
+# subnet CIDRs) arrive through params.env (gitignored, written by scripts/deploy-azure.sh into a
+# temporary copy of deploy/k8s; params.example.env is what CI renders) and are injected with
+# replacements. The optional WAF policy is the separate component azure-waf. Not applied in the
+# cloud yet (v2).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dx02v2
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - gateway.yaml
+  - healthcheckpolicies.yaml
+  - externalsecrets.yaml
+  - hpa.yaml
+  - networkpolicies.yaml
+configMapGenerator:
+  - name: deploy-params
+    envs:
+      - params.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        # Input of the replacements below; kustomize drops it from the output.
+        config.kubernetes.io/local-config: 'true'
+patches:
+  - target:
+      kind: ConfigMap
+      name: app-config
+    patch: |-
+      - op: add
+        path: /data/APP_ENV
+        value: lab
+      - op: add
+        path: /data/DB_SSL_MODE
+        value: verify-full
+      - op: add
+        path: /data/DB_SSL_CA_FILE
+        value: /etc/azure-pg-ca/ca.pem
+  # The HPA owns the replica count (2-4); keeping spec.replicas would reset it on every deploy.
+  # ConfigMap azure-pg-ca: the Azure root CAs, created by scripts/deploy-azure.sh (contract v1).
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: azure-pg-ca
+            configMap:
+              name: azure-pg-ca
+      - op: add
+        path: /spec/template/spec/initContainers/0/volumeMounts
+        value:
+          - name: azure-pg-ca
+            mountPath: /etc/azure-pg-ca
+            readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - name: azure-pg-ca
+            mountPath: /etc/azure-pg-ca
+            readOnly: true
+replacements:
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.API_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: api
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=migrate].image
+          - spec.template.spec.containers.[name=api].image
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.WEB_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: web
+        fieldPaths:
+          - spec.template.spec.containers.[name=web].image
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.AGC_ID
+    targets:
+      - select:
+          kind: Gateway
+          name: dx02v2
+        fieldPaths:
+          - metadata.annotations.[alb.networking.azure.io/alb-id]
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.AGC_FRONTEND
+    targets:
+      - select:
+          kind: Gateway
+          name: dx02v2
+        fieldPaths:
+          - spec.addresses.0.value
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.AGC_SUBNET_CIDR
+    targets:
+      - select:
+          kind: NetworkPolicy
+          name: web-ingress-from-agc
+        fieldPaths:
+          - spec.ingress.0.from.0.ipBlock.cidr
+      - select:
+          kind: NetworkPolicy
+          name: api-ingress-from-agc
+        fieldPaths:
+          - spec.ingress.0.from.0.ipBlock.cidr
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.POSTGRES_SUBNET_CIDR
+    targets:
+      - select:
+          kind: NetworkPolicy
+          name: api-egress-to-postgres-subnet
+        fieldPaths:
+          - spec.egress.0.to.0.ipBlock.cidr

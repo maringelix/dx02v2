@@ -1,0 +1,77 @@
+# Deploys dx02v2 to the AKS lab cluster of tx02v2 (contract v1, docs/CONTRATO.md). CLOUD-MUTATING
+# and billable (ACR images, Application Gateway for Containers programmed by the ALB Controller):
+# dispatch manually after the tx02v2 apply and platform workflows; tear down with the tx02v2
+# destroy. The `lab` environment (required reviewer, main only) gates the federated credential of
+# the managed identity dx02v2-gha-deploy (subject repo:<owner>/dx02v2:environment:lab). Not run in
+# the cloud yet (v2). Every step of the deploy lives in scripts/deploy-azure.sh, the same script a
+# laptop runs.
+name: deploy-azure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dx02v2-lab-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: lab
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check repository variables
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
+        run: |
+          guid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          problems=()
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_APPCONFIG_ENDPOINT; do
+            if [[ -z "${!v}" ]]; then
+              problems+=("$v is not set")
+            elif [[ "$v" != AZURE_APPCONFIG_ENDPOINT && ! "${!v}" =~ $guid ]]; then
+              problems+=("$v is not a lowercase GUID")
+            fi
+          done
+          if [[ -n "$AZURE_APPCONFIG_ENDPOINT" && ! "$AZURE_APPCONFIG_ENDPOINT" =~ ^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$ ]]; then
+            problems+=("AZURE_APPCONFIG_ENDPOINT is not https://tx02v2-lab-<suffix>.azconfig.io")
+          fi
+          if ((${#problems[@]} > 0)); then
+            printf '::error::Repository variable problem: %s\n' "${problems[@]}"
+            echo "::error::Settings > Secrets and variables > Actions > Variables; see docs/RUNBOOK.md (section 'Variáveis do GitHub')."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install kubectl and kubelogin (pinned, SHA256-verified)
+        run: bash scripts/install-tools.sh kubectl kubelogin
+
+      # Right before the deploy: the GitHub OIDC assertion lives 5-10 minutes, and the deploy
+      # acquires every Azure token it needs in its first minutes.
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy (scripts/deploy-azure.sh)
+        env:
+          AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
+          GIT_SHA: ${{ github.sha }}
+        run: bash scripts/deploy-azure.sh

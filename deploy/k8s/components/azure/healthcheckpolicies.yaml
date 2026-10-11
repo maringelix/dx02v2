@@ -1,0 +1,49 @@
+# AGC health probes (alb.networking.azure.io/v1, one HealthCheckPolicy per Service): web /healthz,
+# api /readyz, on the port of the HTTPRoute backend (8080, 3000). Without a policy AGC would fall
+# back to the pods' readiness probes; the policy makes the contract explicit. The probes come from
+# the AGC subnet, like the traffic (NetworkPolicies web-ingress-from-agc, api-ingress-from-agc).
+apiVersion: alb.networking.azure.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web
+spec:
+  targetRef:
+    group: ''
+    kind: Service
+    name: web
+  default:
+    interval: 5s
+    timeout: 3s
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    http:
+      path: /healthz
+      match:
+        statusCodes:
+          - start: 200
+            end: 299
+---
+apiVersion: alb.networking.azure.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: api
+  labels:
+    app.kubernetes.io/name: api
+spec:
+  targetRef:
+    group: ''
+    kind: Service
+    name: api
+  default:
+    interval: 5s
+    timeout: 3s
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    http:
+      path: /readyz
+      match:
+        statusCodes:
+          - start: 200
+            end: 299

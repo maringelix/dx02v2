@@ -1,0 +1,28 @@
+# Node.js dependencies, build output and test reports
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+.eslintcache
+npm-debug.log*
+
+# Harness tools and scratch data
+.tools/
+.cache/
+
+# Local credentials and deploy parameters (generated at runtime; the examples are committed)
+.env
+.env.*
+!.env.example
+deploy/k8s/components/azure/params.env
+*.pem
+*.key
+kubeconfig
+.kube/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

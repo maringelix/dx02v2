@@ -1,0 +1,80 @@
+name: Cloud run report
+description: I deployed this app in my own Azure subscription (with tx02v2). Share what happened so the status matrix stays honest.
+title: 'cloud run: <date> <location>'
+labels:
+  - cloud-run
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Follow docs/RUNBOOK.md (and the tx02v2 runbook for the infrastructure). Redact subscription,
+        tenant, client and object IDs (use `00000000-0000-0000-0000-000000000000`), resource IDs, IPs,
+        e-mails and the Application Gateway for Containers frontend FQDN. A report counts as evidence
+        only with the commit SHAs, the smoke test output and the leftover check result.
+  - type: input
+    id: date
+    attributes:
+      label: Date (UTC)
+      placeholder: '2026-10-11'
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Azure location
+      placeholder: eastus2
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and commit
+      description: dx02v2 and tx02v2 commit SHAs, Kubernetes version, ALB Controller version, image tags, overlay (azure or azure-waf).
+    validations:
+      required: true
+  - type: checkboxes
+    id: steps
+    attributes:
+      label: Steps executed
+      options:
+        - label: tx02v2 bootstrap, apply and platform (see the tx02v2 report)
+        - label: GitHub variables of dx02v2 (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_APPCONFIG_ENDPOINT)
+        - label: deploy-azure workflow (or scripts/deploy-azure.sh from a laptop)
+        - label: images pushed to ACR (dx02v2/api, dx02v2/web)
+        - label: ExternalSecrets synced, rollouts complete
+        - label: Gateway programmed (and the WebApplicationFirewallPolicy accepted, with the WAF)
+        - label: smoke test through Application Gateway for Containers passed
+        - label: tx02v2 destroy + leftover check
+  - type: input
+    id: duration
+    attributes:
+      label: Total duration (deploy to destroy)
+      placeholder: 1h10m
+    validations:
+      required: true
+  - type: input
+    id: cost
+    attributes:
+      label: Observed cost (Cost Management, in your billing currency)
+      placeholder: 'USD 1.50'
+    validations:
+      required: true
+  - type: textarea
+    id: smoke
+    attributes:
+      label: Smoke test output
+      description: PASS/FAIL lines printed by e2e/smoke.mjs (no tokens are printed).
+    validations:
+      required: true
+  - type: textarea
+    id: problems
+    attributes:
+      label: Problems and workarounds
+      description: Errors, retries, manual fixes (redacted logs welcome).
+  - type: textarea
+    id: leftovers
+    attributes:
+      label: Leftovers after destroy
+      description: Output of the tx02v2 leftover check (redacted) and anything you had to delete by hand.
+    validations:
+      required: true

@@ -1,0 +1,55 @@
+# Azure edges on top of the base policies (enforced by Cilium, the dataplane of the tx02v2 AKS
+# cluster with Azure CNI Overlay): Application Gateway for Containers reaches the pods directly
+# from its delegated subnet (traffic and health probes), and the API reaches PostgreSQL Flexible
+# Server in its delegated subnet. The CIDRs come from App Configuration (tx02v2/lab/agc-subnet-cidr,
+# tx02v2/lab/postgres-subnet-cidr) through deploy-params.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-ingress-from-agc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress-from-agc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress-to-postgres-subnet
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.0.2.0/24
+      ports:
+        - protocol: TCP
+          port: 5432

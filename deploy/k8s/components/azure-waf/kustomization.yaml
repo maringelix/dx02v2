@@ -1,0 +1,23 @@
+# Optional WAF policy (contract v1: only when App Configuration tx02v2/lab/waf/policy-id is not the
+# literal `none`). Use after components/azure, which provides the deploy-params ConfigMap
+# (WAF_POLICY_ID).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dx02v2
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - wafpolicy.yaml
+replacements:
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.WAF_POLICY_ID
+    targets:
+      - select:
+          kind: WebApplicationFirewallPolicy
+          name: dx02v2
+        fieldPaths:
+          - spec.webApplicationFirewall.id

@@ -1,0 +1,53 @@
+# Contract v1: Application Gateway for Containers (AGC) created by tx02v2 ("bring your own"
+# deployment), programmed by its ALB Controller through Gateway API. The AGC resource ID
+# (App Configuration tx02v2/lab/agc/id) goes in the alb-id annotation and the frontend name
+# (tx02v2/lab/agc/frontend-name) in spec.addresses, as in the official AGC how-to guides
+# (verified 2026-10-11). HTTP on port 80 only: HTTPS needs a TLS Secret and is planned.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: dx02v2
+  labels:
+    app.kubernetes.io/name: dx02v2
+  annotations:
+    alb.networking.azure.io/alb-id: replaced-from-deploy-params
+spec:
+  gatewayClassName: azure-alb-external
+  addresses:
+    - type: alb.networking.azure.io/alb-frontend
+      value: replaced-from-deploy-params
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# /api goes straight to the API (one proxy hop: TRUST_PROXY_HOPS=1), everything else to the web.
+# Gateway API picks the longest matching path prefix, so the order of the rules does not matter.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dx02v2
+  labels:
+    app.kubernetes.io/name: dx02v2
+spec:
+  parentRefs:
+    - name: dx02v2
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: api
+          port: 3000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web
+          port: 8080

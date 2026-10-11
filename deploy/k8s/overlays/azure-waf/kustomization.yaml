@@ -1,0 +1,11 @@
+# Same as overlays/azure plus the WebApplicationFirewallPolicy on the Gateway; chosen by
+# scripts/deploy-azure.sh when App Configuration tx02v2/lab/waf/policy-id holds a WAF policy ID
+# (tx02v2 applied with enable_waf = true).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dx02v2
+resources:
+  - ../../base
+components:
+  - ../../components/azure
+  - ../../components/azure-waf
