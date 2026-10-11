@@ -34,23 +34,22 @@ A família do lab (v2):
 
 | Capacidade | Status | Evidência |
 |---|---|---|
-| Lint, formatação e checagem de tipos (eslint, prettier, tsc para `api` e `web`) | `verificado localmente` | `make static` (`eslint`, `prettier`, `typecheck:*`); job `static` do CI |
-| Dockerfiles, workflows e scripts (hadolint, actionlint, shellcheck) | `verificado localmente` | `make static` (`hadolint`, `actionlint`, `shellcheck`) |
-| Manifests Kubernetes: render do kustomize + kubeconform estrito (local, azure, azure-waf) com schemas de Gateway API e Application Gateway for Containers gerados dos CRDs do ALB Controller fixado, asserções de contrato e de hardening, trivy config | `verificado localmente` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
-| Scan de segredos e políticas do repositório (sem identificadores reais nem GUIDs, actions e imagens fixadas, regressões do v1, sem restos do caminho AWS) | `verificado localmente` | `make static` (`gitleaks`, `policy-*`, `repo-structure`, `version-consistency`) |
-| Testes unitários + de integração da API contra um PostgreSQL 17 real (gate de cobertura: linhas >= 80 %, branches >= 70 %) | `verificado localmente` | `make test` (`test:api`); job `test` do CI |
-| Testes da página com Testing Library + jsdom (gate de cobertura: linhas >= 70 %) | `verificado localmente` | `make test` (`test:web`); job `test` do CI |
-| Imagens: build, usuário numérico não root, sem npm nem shell no runtime da API, gate do trivy HIGH/CRITICAL | `verificado localmente` | `make build`; job `images` do CI |
+| Lint, formatação e checagem de tipos (eslint, prettier, tsc para `api` e `web`) | `verificado no CI` | `make static` (`eslint`, `prettier`, `typecheck:*`); job `static` do CI |
+| Dockerfiles, workflows e scripts (hadolint, actionlint, shellcheck) | `verificado no CI` | `make static` (`hadolint`, `actionlint`, `shellcheck`) |
+| Manifests Kubernetes: render do kustomize + kubeconform estrito (local, azure, azure-waf) com schemas de Gateway API e Application Gateway for Containers gerados dos CRDs do ALB Controller fixado, asserções de contrato e de hardening, trivy config | `verificado no CI` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
+| Scan de segredos e políticas do repositório (sem identificadores reais nem GUIDs, actions e imagens fixadas, regressões do v1, sem restos do caminho AWS) | `verificado no CI` | `make static` (`gitleaks`, `policy-*`, `repo-structure`, `version-consistency`) |
+| Testes unitários + de integração da API contra um PostgreSQL 17 real (gate de cobertura: linhas >= 80 %, branches >= 70 %) | `verificado no CI` | `make test` (`test:api`); job `test` do CI |
+| Testes da página com Testing Library + jsdom (gate de cobertura: linhas >= 70 %) | `verificado no CI` | `make test` (`test:web`); job `test` do CI |
+| Imagens: build, usuário numérico não root, sem npm nem shell no runtime da API, gate do trivy HIGH/CRITICAL | `verificado no CI` | `make build`; job `images` do CI |
 | Stack do compose (PostgreSQL → migrate → api → web em 127.0.0.1) + smoke test | `verificado localmente` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, fora do CI) |
-| Ponta a ponta no kind: Pod Security `restricted`, smoke test pelo nginx, enforcement de NetworkPolicy | `verificado localmente` | `make e2e` (`scripts/e2e-kind.sh`); job `e2e` do CI |
+| Ponta a ponta no kind: Pod Security `restricted`, smoke test pelo nginx, enforcement de NetworkPolicy | `verificado no CI` | `make e2e` (`scripts/e2e-kind.sh`); job `e2e` do CI |
 | Deploy na Azure (push no ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, smoke test por ele) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
 | HTTPS no listener do Application Gateway for Containers | `planejado` | precisa de um Secret TLS; fora do contrato v1 (`docs/CONTRATO.md`) |
 | Configurações do repositório como código (ruleset, environment `lab`) | `planejado` | `scripts/repo-guardrails.sh`, `docs/PUBLICACAO.md` |
 
-As linhas `verificado localmente` rodaram em containers Linux antes do primeiro push; elas viram
-`verificado no CI` depois do primeiro CI verde (jobs na coluna Evidência), menos a linha do compose,
-que continua local. A linha da Azure só muda com uma issue `cloud_run_report` (data, região, commits,
-custo, saída do smoke test, sobras).
+As linhas `verificado no CI` rodam em todo pull request, em todo push para a `main` e toda semana
+(jobs do CI na coluna Evidência); a linha do compose é verificada só localmente. A linha da Azure só
+muda com uma issue `cloud_run_report` (data, região, commits, custo, saída do smoke test, sobras).
 
 ## Arquitetura
 

@@ -63,3 +63,13 @@ All notable changes to this project are documented here. The format follows
 
 - The AWS path: `deploy/k8s/components/aws*`, `deploy/k8s/overlays/aws*`, `scripts/deploy-aws.sh`,
   `.github/workflows/deploy-aws.yml`, and the AWS contract checks and docs.
+
+### Changed (after the first push)
+
+- The CI (`static`, `test`, `images`, `e2e`) ran green on GitHub: the README status matrix now says
+  `verified in CI` for those rows (the compose row stays `verified locally`).
+- docs/CONTRATO.md mirrors the contract v1 of tx02v2: the Role lists the real AGC CRD plurals
+  (`healthcheckpolicy`, `webapplicationfirewallpolicy`), and the implementation notes are recorded as
+  incorporated (frontend through `spec.addresses`, /24 AGC subnet, x86-64 nodes, kubelet `AcrPull`,
+  the three Azure roles of `app_deployer_principal_ids`). docs/RUNBOOK.md and docs/SUSTENTACAO.md
+  follow.

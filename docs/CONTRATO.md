@@ -40,8 +40,9 @@ conter (o check `contract-app` recusa qualquer outro tipo):
   os segredos; o deployer nunca os escreve)
 - `networking.k8s.io`: networkpolicies → CRUD completo
 - `gateway.networking.k8s.io`: gateways, httproutes → CRUD completo
-- `alb.networking.azure.io`: healthcheckpolicies, webapplicationfirewallpolicies → CRUD completo
-  (ver a nota 2 abaixo sobre os nomes dos recursos)
+- `alb.networking.azure.io`: `healthcheckpolicy`, `webapplicationfirewallpolicy` → CRUD completo
+  (são os `spec.names.plural` dos CRDs do ALB Controller 1.12.2, iguais ao singular; uma regra RBAC
+  com `healthcheckpolicies`/`webapplicationfirewallpolicies` não casaria com nada)
 - `autoscaling`: horizontalpodautoscalers → CRUD completo; `policy`: poddisruptionbudgets → CRUD completo
 - `external-secrets.io`: externalsecrets → CRUD completo
 
@@ -130,10 +131,11 @@ neste repositório.
 - PostgreSQL Flexible Server 17, porta 5432, só acesso privado (subnet delegada + zona DNS privada),
   `require_secure_transport = on`, TLS >= 1.2.
 
-## Notas da implementação (2026-10-11, pendentes de decisão no tx02v2)
+## Notas da implementação (2026-10-11, incorporadas ao contrato v1)
 
 Encontradas ao implementar o lado do app contra a documentação oficial e os CRDs do ALB Controller
-1.12.2. Nenhuma mudou o contrato; cada uma precisa de um PR coordenado se for aceita.
+1.12.2. Todas foram incorporadas ao `docs/CONTRATO.md` do tx02v2 antes da primeira publicação dele,
+então o contrato continua na versão 1; ficam aqui como registro de por que o texto é assim.
 
 1. **Frontend do AGC.** O contrato fala em anotação `alb.networking.azure.io/alb-frontend` no Gateway;
    essa anotação é da Ingress API. Na Gateway API (modo "bring your own"), os guias oficiais usam a
@@ -145,11 +147,12 @@ Encontradas ao implementar o lado do app contra a documentação oficial e os CR
    (`kubectl auth can-i create healthcheckpolicy.alb.networking.azure.io`) acusaria a falta.
 3. **Tamanho do corpo do smoke.** O contrato diz que o smoke manda ~12 KB; ele manda 70 KB (abaixo dos
    128 KB do WAF, acima dos 10 kb da API), então a conclusão (413 da própria API) se mantém.
-4. **Lacunas.** O contrato não diz: que `host` em `tx02v2-lab-db-app` precisa ser o FQDN do servidor
-   (o `verify-full` confere o nome); que a identidade kubelet do AKS precisa de `AcrPull` no registry;
-   a arquitetura dos nós (as imagens são `linux/amd64`); que a subnet do AGC com Azure CNI Overlay
-   precisa ser exatamente /24 (o deploy recusa outro prefixo); e quais papéis Azure um principal de
-   `app_deployer_principal_ids` (deploy a partir de um laptop) recebe além da RoleBinding.
+4. **Lacunas (agora no contrato do tx02v2).** `host` em `tx02v2-lab-db-app` é o FQDN do servidor (o
+   `verify-full` confere o nome); a identidade kubelet do AKS tem `AcrPull` no registry; os nós são
+   x86-64 (as imagens são `linux/amd64`); a subnet do AGC com Azure CNI Overlay é exatamente /24 (o
+   deploy recusa outro prefixo); e cada principal de `app_deployer_principal_ids` (deploy a partir de
+   um laptop) recebe os mesmos papéis Azure da `dx02v2-gha-deploy` (AcrPush, Azure Kubernetes Service
+   Cluster User Role e App Configuration Data Reader) além da RoleBinding.
 
 ## Mudando o contrato
 
