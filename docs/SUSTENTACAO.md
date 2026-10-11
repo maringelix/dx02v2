@@ -13,12 +13,13 @@ descrita lá.
 
 ## 2. Estado atual
 
-- Estágios `static`, `test`, `build` e `e2e` `verificado localmente` em containers Linux; o CI ainda
-  não rodou no GitHub.
+- Estágios `static`, `test`, `build` e `e2e` `verificado no CI` (jobs `static`, `test`, `images` e
+  `e2e` verdes no GitHub) e também em containers Linux locais.
 - Deploy na Azure: `não executado em nuvem (v2)`; `scripts/deploy-azure.sh` foi exercitado só com
   `az`/`kubectl`/`kubelogin`/`docker` simulados.
-- Contrato com o tx02v2: versão 1 (`docs/CONTRATO.md`), com as notas de implementação pendentes de
-  decisão no tx02v2.
+- Contrato com o tx02v2: versão 1 (`docs/CONTRATO.md`), espelho da parte do app do
+  `docs/CONTRATO.md` do tx02v2; as notas de implementação foram incorporadas ao contrato antes da
+  primeira publicação do tx02v2.
 - App: o do `dx01v2` no commit `22e69c4`, com as diferenças da seção 5.10.
 - Exceções de scanner: nenhuma (`.trivyignore.yaml` vazio).
 

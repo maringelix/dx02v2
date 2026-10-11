@@ -103,8 +103,8 @@ workflow confere o formato antes de tudo e o `azure/login` mascara o client ID).
 
 Papéis Azure do principal que faz o deploy (o tx02v2 atribui à `dx02v2-gha-deploy`): `AcrPush` no
 registry, `Azure Kubernetes Service Cluster User Role` no cluster e `App Configuration Data Reader` no
-store. A partir de um laptop, o seu usuário precisa dos mesmos três papéis (o contrato v1 não diz se o
-tx02v2 os atribui aos `app_deployer_principal_ids`; ver `docs/CONTRATO.md`, nota 4).
+store. A partir de um laptop, o seu usuário precisa dos mesmos três papéis: o tx02v2 os atribui a
+cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/CONTRATO.md`).
 
 ## 7. Deploy
 
@@ -140,8 +140,8 @@ az login && az account set --subscription <assinatura do lab>
 AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
 ```
 
-Em Apple Silicon o build `linux/amd64` roda emulado (mais lento); o contrato não fixa a arquitetura
-dos nós do tx02v2 e as imagens são x86_64.
+Em Apple Silicon o build `linux/amd64` roda emulado (mais lento): o contrato fixa nós x86-64 no
+tx02v2, e as imagens são `linux/amd64`.
 
 ## 8. Conferir
 
@@ -170,7 +170,7 @@ cobrando).
 | `logged in to another subscription` | `az` em outra assinatura | `az account set --subscription <assinatura do lab>` |
 | `AADSTS700024: Client assertion is not within its valid time range` | o token OIDC do GitHub expirou antes de o `az` obter um token novo | rode o workflow de novo; não coloque passos lentos entre o `azure/login` e o deploy |
 | `the cluster does not serve ...` | camada de plataforma do tx02v2 não instalada | rode o workflow de plataforma do tx02v2 |
-| `this principal cannot deploy to namespace dx02v2 (...)` | sem RoleBinding `dx02v2-deployers` para este object ID, ou regra faltando na Role | confira a plataforma do tx02v2 (`docs/CONTRATO.md`, nota 2 sobre os nomes dos recursos do AGC) |
+| `this principal cannot deploy to namespace dx02v2 (...)` | sem RoleBinding `dx02v2-deployers` para este object ID, ou regra faltando na Role | confira a plataforma do tx02v2; a Role usa os plurais dos CRDs do AGC, `healthcheckpolicy` e `webapplicationfirewallpolicy` (`docs/CONTRATO.md`) |
 | `docker login to ... failed` | sem `AcrPush` no registry | papéis da seção 6 |
 | `refusing https://...: SHA-1 thumbprint ...` | a raiz baixada não é a do contrato | pare: confira a página "Azure Certificate Authority details"; mudar a raiz é mudança de contrato |
 | ExternalSecret não fica `Ready` | ClusterSecretStore, identidade do ESO ou segredo ausente | `kubectl -n dx02v2 describe externalsecret db-credentials`; confira a plataforma do tx02v2 |
@@ -179,7 +179,7 @@ cobrando).
 | WebApplicationFirewallPolicy sem `Accepted` | SecurityPolicy do AGC no tx02v2, ou política em outra assinatura/região | `kubectl -n dx02v2 describe webapplicationfirewallpolicy dx02v2` |
 | Smoke com 403 em tudo | regra do WAF (Bot Manager, regra personalizada) | logs do WAF no tx02v2; nenhuma regra pode bloquear o smoke (contrato) |
 | Smoke falha em `X-Request-Id` | o AGC não substituiu o `x-request-id` como a documentação descreve | registre no `cloud_run_report`; a asserção muda nos dois repositórios só com evidência |
-| `ImagePullBackOff` | a identidade kubelet do AKS sem `AcrPull` no registry | tx02v2 (lacuna do contrato, nota 4) |
+| `ImagePullBackOff` | a identidade kubelet do AKS sem `AcrPull` no registry | o tx02v2 atribui esse papel no apply (contrato); confira o apply e as atribuições do registry |
 
 ## 11. Registro
 
