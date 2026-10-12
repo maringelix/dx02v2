@@ -73,3 +73,12 @@ All notable changes to this project are documented here. The format follows
   incorporated (frontend through `spec.addresses`, /24 AGC subnet, x86-64 nodes, kubelet `AcrPull`,
   the three Azure roles of `app_deployer_principal_ids`). docs/RUNBOOK.md and docs/SUSTENTACAO.md
   follow.
+- The README family table and AGENTS.md link the Google Cloud pair (`tx03v2`, `dx03v2`), now public;
+  `dx03v2` runs this same application (AGENTS.md rule 6 and the parity routine of
+  docs/SUSTENTACAO.md, section 5.10, name it).
+- One integration test case more, ported from `dx03v2` for parity: the
+  `[<supplied>,]<client-ip>,<lb-ip>` `X-Forwarded-For` of the Google Cloud Application Load Balancer
+  with `TRUST_PROXY_HOPS=2` (`api/test/integration/rate-limit.test.ts`, now identical in dx02v2 and
+  dx03v2).
+- Dependabot ignores major bumps of the `node` build image (it follows `.nvmrc` and `engines.node`;
+  a `node:26` bump fails `npm ci` with EBADENGINE).

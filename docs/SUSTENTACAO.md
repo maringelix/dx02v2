@@ -154,10 +154,11 @@ Fora do Dependabot: `gh api repos/<o>/<r>/git/ref/tags/<tag>`; se `object.type =
 Para cada entrada de `.trivyignore.yaml` perto do `expired_at`: o motivo ainda vale? Se sim, renove
 por até ~7 meses com a justificativa atualizada; se não, corrija e remova a entrada.
 
-### 5.10 Paridade com o dx01v2 (trimestral e a cada mudança de app)
+### 5.10 Paridade com o dx01v2 e o dx03v2 (trimestral e a cada mudança de app)
 
 O app (`api/`, `web/`, `e2e/`), a `base` dos manifests e o overlay `local` têm de continuar iguais aos
-do `dx01v2`, a menos dos nomes. Compare com a `main` dele:
+do `dx01v2` e do `dx03v2` (o app do Google Cloud, copiado deste repositório), a menos dos nomes.
+Compare com a `main` do dx01v2 (abaixo) e repita o mesmo procedimento com o dx03v2:
 
 ```bash
 ref="$(mktemp -d)"
@@ -173,8 +174,9 @@ rm -rf "$ref"
 ```
 
 Diferenças esperadas (só estas): `e2e/smoke.mjs` e `e2e/lib.mjs` (`SMOKE_EDGE` no lugar do
-`SMOKE_BEHIND_WAF`, CSP exata em `/api`); `api/test/integration/rate-limit.test.ts` (um caso a mais,
-formato do AGC); `api/test/unit/config.test.ts` (caminho de exemplo do CA); comentários em
+`SMOKE_BEHIND_WAF`, CSP exata em `/api`); `api/test/integration/rate-limit.test.ts` (só comentários:
+os casos do AGC e do load balancer do Google Cloud estão nos três repositórios do app);
+`api/test/unit/config.test.ts` (caminho de exemplo do CA); comentários em
 `api/src/app.ts`, `api/src/server.ts`, `web/src/api.ts`, `web/vite.config.ts`,
 `web/nginx/default.conf` e nos manifests da `base` e do `local`. Qualquer outra diferença é deriva:
 porte a correção para o repositório que ficou para trás (um PR em cada) ou registre no CHANGELOG por

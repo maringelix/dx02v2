@@ -77,6 +77,30 @@ describe('write rate limit', () => {
     expect(statuses).toEqual([201, 201, 201, 429]);
   });
 
+  it('reads the client from the X-Forwarded-For of the Google Cloud Application Load Balancer', async () => {
+    // The global external Application Load Balancer appends `<client-ip>,<load-balancer-ip>` to
+    // whatever the client sent, `[<supplied>,]<client-ip>,<lb-ip>`, and the connection comes from a
+    // Google Front End (docs "External Application Load Balancer overview", checked 2026-10-11):
+    // two trusted hops, TRUST_PROXY_HOPS=2 in dx03v2.
+    const t = app('2');
+    const statuses: number[] = [];
+    for (let i = 1; i <= LIMIT + 1; i++) {
+      const res = await request(t.app)
+        .post('/api/messages')
+        .set('X-Forwarded-For', `198.51.100.${i},203.0.113.9,192.0.2.10`)
+        .send({ author: 'Ana', text: `gke ${i}` });
+      statuses.push(res.status);
+    }
+    expect(statuses).toEqual([201, 201, 201, 429]);
+
+    // Another client behind the same load balancer has its own budget.
+    const other = await request(t.app)
+      .post('/api/messages')
+      .set('X-Forwarded-For', '198.51.100.99,203.0.113.8,192.0.2.10')
+      .send({ author: 'Bia', text: 'outra origem' });
+    expect(other.status).toBe(201);
+  });
+
   it('counts rejected writes too (the limiter runs before validation)', async () => {
     const t = app('1');
     const statuses: number[] = [];
