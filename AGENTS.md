@@ -6,8 +6,8 @@ is the source of truth. The full rule list (pt-BR) is [docs/GUARDRAILS.md](docs/
 ## 1. Mission and context
 
 - `dx02v2` is the application half of the Azure pair (`tx02v2` + `dx02v2`) of a public, educational
-  DevOps lab: one infrastructure + application pair per cloud (v2 family in the README; the GCP pair
-  `tx03v2` + `dx03v2` is planned).
+  DevOps lab: one infrastructure + application pair per cloud (v2 family in the README; the Google
+  Cloud pair `tx03v2` + `dx03v2` runs the same app).
 - The app is the same one as `dx01v2` (source commit `22e69c4`), on purpose: a small message board
   (Express 5 + TypeScript API, React 19 page served by nginx-unprivileged, PostgreSQL 17). Only the
   deploy target changes: Kubernetes manifests (kustomize) for kind and for the AKS cluster of
@@ -35,8 +35,8 @@ is the source of truth. The full rule list (pt-BR) is [docs/GUARDRAILS.md](docs/
 4. Never widen Azure roles, network (NetworkPolicy, Gateway, HTTPRoute), RBAC or CORS without stating
    why in the PR. The API has no CORS middleware on purpose (same origin).
 5. Keep the contract: changes need coordinated PRs in `tx02v2` and `dx02v2` and a version bump.
-6. Keep parity with `dx01v2`: a change to `api/`, `web/` or `e2e/` is ported to both repositories,
-   or the PR says why it is Azure-only (docs/SUSTENTACAO.md, parity routine).
+6. Keep parity with `dx01v2` and `dx03v2`: a change to `api/`, `web/` or `e2e/` is ported to all
+   the app repositories, or the PR says why it is Azure-only (docs/SUSTENTACAO.md, parity routine).
 7. Pin every new dependency, action and image (exact npm version + lockfile, 40-char SHA +
    `# vX.Y.Z`, image digest, tool version + SHA256) and update the docs in the same change.
 8. Once the ruleset is on, never push to `main`: pull requests only.
