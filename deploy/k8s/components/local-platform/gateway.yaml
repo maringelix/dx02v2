@@ -1,0 +1,72 @@
+# Edge of the local lab: a Gateway API Gateway of class istio (the local twin of Application Gateway
+# for Containers with the GatewayClass azure-alb-external), exposed by the load balancer emulator of
+# tx02v2. HTTPS with a certificate cert-manager issues from the ClusterIssuer lab-ca (in Azure the AGC
+# listener is HTTP for now, HTTPS planned); HTTP only redirects. /api goes straight to the API, like the
+# HTTPRoute of the azure component; everything else to web (nginx). The tx02v2 EnvoyFilter
+# gateway-preserve-request-id keeps an external X-Request-Id (AGC assigns its own instead).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: dx02v2
+  annotations:
+    cert-manager.io/cluster-issuer: lab-ca
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: dx02v2.tx02v2.local
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: dx02v2.tx02v2.local
+      allowedRoutes:
+        namespaces:
+          from: Same
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: dx02v2-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dx02v2-redirect
+spec:
+  parentRefs:
+    - name: dx02v2
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dx02v2
+spec:
+  parentRefs:
+    - name: dx02v2
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: api
+          port: 3000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web
+          port: 8080

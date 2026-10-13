@@ -59,6 +59,9 @@ Tipos: `bloqueante` (falha o harness/CI), `alerta` (notifica), `processo` (disci
 | DOC-02 | Docs atualizadas na mesma mudança do código | docs não envelhecem | template de PR | processo |
 | AGT-01 | Agentes de IA nunca executam ações que alteram a nuvem sem pedido humano explícito na tarefa | dinheiro e segurança | `AGENTS.md` | processo |
 | AGT-02 | Agentes não enfraquecem gates, não baixam cobertura e não adicionam ignores sem justificativa e validade | o harness só vale se for respeitado | `AGENTS.md`; checks acima | processo |
+| LOC-01 | No lab local o app entra só pelo GitOps (Argo CD, AppProject `dx02v2`); o deploy não aplica manifests do app direto no cluster | um único dono do namespace (v1 tinha dois) | `scripts/deploy-local.sh`; sonda `gitops` | bloqueante (job `e2e-platform`) |
+| LOC-02 | No lab local: mTLS `STRICT`, `AuthorizationPolicy` por identidade e NetworkPolicies com HBONE e as sondas do kubelet do ambient | zero trust com identidade, não só por IP | `contract-app` (`local-platform`); sonda `mesh` | bloqueante |
+| LOC-03 | Toda regra de alerta usa uma série que o app ou o kube-state-metrics exporta e tem teste no promtool | v1 alertava sobre séries inexistentes | `promtool-rules`; sonda `observability` | bloqueante |
 | AGT-03 | Agentes param e perguntam nos casos listados em `AGENTS.md` | decisões caras são humanas | `AGENTS.md` | processo |
 
 ## Exceções

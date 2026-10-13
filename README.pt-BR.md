@@ -47,6 +47,10 @@ A família do lab (v2):
 | Deploy na Azure (push no ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, smoke test por ele) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
 | HTTPS no listener do Application Gateway for Containers | `planejado` | precisa de um Secret TLS; fora do contrato v1 (`docs/CONTRATO.md`) |
 | Configurações do repositório como código (ruleset, environment `lab`) | `planejado` | `scripts/repo-guardrails.sh`, `docs/PUBLICACAO.md` |
+| Overlay `local-platform` para o lab local do tx02v2: render do kustomize + kubeconform estrito, asserções contra o contrato local e os kinds do AppProject `dx02v2`, cinco regras de alerta testadas com promtool | `verificado no CI` | `make static` (`kubeconform`, `contract-app`, `promtool-rules`) num contêiner Linux; job `static` do CI |
+| **O app na plataforma local completa do tx02v2** (kind + ACR, PostgreSQL Flexible Server, armazenamento de objetos, load balancer e servidor git emulados): imagens no registry do lab, GitOps com Argo CD (Synced, Healthy, self-heal) | `verificado no CI` | `make e2e-platform` (`scripts/deploy-local.sh`, `scripts/e2e-platform.sh`, `docs/LAB_LOCAL.md`); job `e2e-platform` do CI |
+| HTTPS pelo load balancer emulado e um Gateway do Istio (cert-manager, CA do lab), smoke test de fora do mesh (`SMOKE_EDGE=istio`); TLS `verify-full` no banco | `verificado no CI` | `make e2e-platform` (sonda `smoke`) |
+| Istio ambient: mTLS `STRICT`, `AuthorizationPolicy` por identidade, NetworkPolicies com HBONE; Prometheus, dashboard do Grafana, Loki; Gatekeeper, Trivy Operator, HPA 2-4; ensaio de backup + restore do banco; experimento de chaos | `verificado no CI` | `make e2e-platform` (sondas `mesh`, `observability`, `trivy`, `hpa`, `backup`, `chaos`) |
 
 As linhas `verificado no CI` rodam em todo pull request, em todo push para a `main` e toda semana
 (jobs do CI na coluna Evidência); a linha do compose é verificada só localmente. A linha da Azure só
@@ -118,12 +122,13 @@ Application Gateway for Containers → destroy do tx02v2 + checagem de sobras �
 | Alvo | O que roda | Quando |
 |---|---|---|
 | `make help` | lista os alvos | a qualquer momento |
-| `make tools` | `scripts/install-tools.sh`: trivy 0.75.0, hadolint 2.15.1, actionlint 1.7.12, shellcheck 0.11.0, kubeconform 0.8.0, gitleaks 8.30.1, kind 0.33.0, kubectl 1.36.5, kubelogin 0.2.21 | uma vez, e depois de atualizar uma ferramenta |
+| `make tools` | `scripts/install-tools.sh`: trivy 0.75.0, hadolint 2.15.1, actionlint 1.7.12, shellcheck 0.11.0, kubeconform 0.8.0, gitleaks 8.30.1, kind 0.33.0, kubectl 1.36.5, kubelogin 0.2.21, promtool 3.15.0 | uma vez, e depois de atualizar uma ferramenta |
 | `make static` | `scripts/harness.sh static` | antes de cada push |
 | `make test` | `scripts/harness.sh test` (PostgreSQL 17 real: `DB_*` ou um container descartável) | antes de cada push |
 | `make verify` | static + test | antes de cada PR |
 | `make build` | `scripts/harness.sh build`: build npm, imagens, política das imagens, gate do trivy | quando código, Dockerfiles ou dependências mudam |
 | `make e2e` | `scripts/harness.sh e2e`: cluster kind, smoke test, sondas de NetworkPolicy | quando manifests, imagens ou o app mudam |
+| `make e2e-platform` | `scripts/harness.sh platform`: o app na plataforma local completa do tx02v2 (clona o tx02v2 em `deploy/local/tx02v2.ref`), sempre destruída no fim (job `e2e-platform` do CI) | mudanças em manifests, imagens ou no app; precisa de Docker com 8 GB |
 | `make all` | todos os estágios | antes de um merge importante |
 | `make clean` | remove `.tools/`, saída de build, cobertura, `node_modules` e dados temporários | — |
 
@@ -137,6 +142,7 @@ Application Gateway for Containers → destroy do tx02v2 + checagem de sobras �
 | [docs/API.md](docs/API.md) | endpoints, erros, exemplos em curl |
 | [docs/CONTRATO.md](docs/CONTRATO.md) | contrato tx02v2 ⇄ dx02v2 v1 (lado do app; fonte da verdade no tx02v2) |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | desenvolvimento local, compose, e2e no kind, deploy na Azure |
+| [docs/LAB_LOCAL.md](docs/LAB_LOCAL.md) | o app na plataforma local do tx02v2 (deploy GitOps, sondas, limites) |
 | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | regras, aplicação, exceções, limites |
 | [docs/HARNESS.md](docs/HARNESS.md) | checks, modo estrito, problemas comuns |
 | [docs/SUSTENTACAO.md](docs/SUSTENTACAO.md) | rotinas, calendário de fim de suporte, procedimentos de atualização, paridade com o dx01v2 |
