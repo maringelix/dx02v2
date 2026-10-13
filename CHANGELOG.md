@@ -17,7 +17,7 @@ All notable changes to this project are documented here. The format follows
   database backup + restore drill, Argo CD self-heal, chaos experiment). Harness checks
   `promtool-rules` (tool promtool 3.15.0) and `platform-e2e` (stage `platform`, `make e2e-platform`,
   CI job `e2e-platform`); `contract-app` asserts the new overlay. The platform e2e is
-  verified locally (13 probes on the tx02v2 local lab, from scratch).
+  verified locally (13 probes on the tx02v2 local lab, from scratch) and in CI.
 - `e2e/smoke.mjs`: `SMOKE_EDGE=istio` for the Istio Gateway of the local platform, which routes `/api`
   straight to the API like AGC and keeps an external `X-Request-Id` like nginx (Azure-specific: the
   `dx01v2` smoke accepts both API CSPs and has no edge modes).

@@ -279,10 +279,19 @@ check_observability() {
   done
   [[ "$body" == *'"value":['*',"1"]'* ]] || die "observability: Prometheus has no healthy target of the dx02v2 API"
   pass "observability: Prometheus scrapes the API through the mesh (up == 1)"
-  body="$(prom_query rules 'type=alert')"
-  for rule in Dx02v2ApiDown Dx02v2HighErrorRate Dx02v2HighLatencyP95 Dx02v2PodRestarting Dx02v2PodNotReady; do
-    [[ "$body" == *"\"$rule\""* ]] || die "observability: alert rule $rule not loaded by Prometheus"
+  # The operator turns the PrometheusRule into a rule file and Prometheus reloads it on its own
+  # schedule (the CI of dx01v2 got here before the reload once).
+  local rules=(Dx02v2ApiDown Dx02v2HighErrorRate Dx02v2HighLatencyP95 Dx02v2PodRestarting Dx02v2PodNotReady) missing
+  for _ in $(seq 1 20); do
+    body="$(prom_query rules 'type=alert')"
+    missing=""
+    for rule in "${rules[@]}"; do
+      [[ "$body" == *"\"$rule\""* ]] || missing+=" $rule"
+    done
+    [[ -z "$missing" ]] && break
+    sleep 6
   done
+  [[ -z "$missing" ]] || die "observability: alert rules not loaded by Prometheus:$missing"
   pass "observability: the five dx02v2 alert rules are loaded"
   # The smoke traffic shows up after the next scrapes (the CI of dx01v2 got here before them once).
   for _ in $(seq 1 20); do
