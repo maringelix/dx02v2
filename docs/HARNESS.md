@@ -8,7 +8,7 @@ Ele vive em `scripts/harness.sh`; o `Makefile` e o CI só o chamam. O que passa 
 
 | Camada | Comando | O que prova | O que NÃO prova | Onde roda |
 |---|---|---|---|---|
-| Ferramentas | `make tools` | binários nas versões de `tools/versions.env` (trivy, hadolint, actionlint, shellcheck, kubeconform, gitleaks, kind, kubectl, kubelogin), SHA256 conferido | — | local, CI |
+| Ferramentas | `make tools` | binários nas versões de `tools/versions.env` (trivy, hadolint, actionlint, shellcheck, kubeconform, gitleaks, kind, kubectl, kubelogin, promtool), SHA256 conferido | — | local, CI |
 | Versões | `tool-versions`, `version-consistency` | PATH com as versões fixadas (estrito); Node.js, PostgreSQL e Kubernetes coerentes entre arquivos; versões npm exatas | — | local, CI |
 | Estrutura e honestidade | `repo-structure` | arquivos obrigatórios, rótulos de status, LF, UTF-8 sem BOM (nada de UTF-16), README <= 250 linhas, bit executável dos scripts no índice do git | que a documentação está certa | local, CI |
 | Políticas | `policy-identifiers`, `policy-workflows`, `policy-images`, `policy-app`, `policy-cloud`, `trivyignore-policy` | sem IDs reais (GUIDs, sufixos dos nomes do tx02v2, IPs, e-mails); actions e imagens fixadas; workflow de deploy só manual, OIDC sem segredos, `azure/login` fixado; regressões do v1 (trust proxy, CORS, estilos inline, HSTS, `console.*`); nada do caminho da outra nuvem; ignores com validade | intenção de quem escreveu | local, CI |
@@ -16,7 +16,7 @@ Ele vive em `scripts/harness.sh`; o `Makefile` e o CI só o chamam. O que passa 
 | Lint, formato e tipos | `eslint`, `prettier`, `typecheck:api`, `typecheck:web` | regras type-aware do typescript-eslint, React hooks, formatação, TypeScript estrito | comportamento | local, CI |
 | Dockerfiles, workflows e scripts | `hadolint`, `actionlint` (com shellcheck), `shellcheck` | boas práticas de Dockerfile, YAML e bash corretos (nível style) | comportamento contra a nuvem | local, CI |
 | Schemas dos CRDs | `crd-schemas` | `deploy/k8s/schemas` é exatamente o que `scripts/update-crd-schemas.sh` gera da imagem de CRDs do ALB Controller fixada (digest conferido em cada download) | que o tx02v2 instala a mesma versão | local, CI (rede) |
-| Manifests | `kubeconform`, `contract-app`, `trivy-config` | overlays `local`, `azure` e `azure-waf` renderizados e válidos (estrito, Kubernetes 1.36, Gateway API v1.5.1 standard, `alb.networking.azure.io/v1`, `ExternalSecret`); asserções do contrato v1 e de hardening (`scripts/check-manifests.mjs`) e das chaves, valores fixos e raízes de CA do `scripts/deploy-azure.sh`; sem HIGH/CRITICAL de configuração | admission e comportamento no cluster (ver e2e), o ALB Controller de verdade | local, CI (rede) |
+| Manifests | `kubeconform`, `contract-app`, `promtool-rules`, `trivy-config` | overlays `local`, `azure`, `azure-waf` e `local-platform` renderizados e válidos (estrito, Kubernetes 1.36, Gateway API v1.5.1 standard, `alb.networking.azure.io/v1`, `ExternalSecret`); asserções do contrato v1 e de hardening (`scripts/check-manifests.mjs`) e das chaves, valores fixos e raízes de CA do `scripts/deploy-azure.sh`; sem HIGH/CRITICAL de configuração | admission e comportamento no cluster (ver e2e), o ALB Controller de verdade | local, CI (rede) |
 | Segredos | `gitleaks` | nenhum segredo conhecido (histórico completo quando há commits) | segredos fora dos padrões do gitleaks | local, CI |
 | Testes da API | `test:api` | unitários e de integração com supertest contra o app real e um PostgreSQL 17 real: migrações idempotentes, fluxos de criar/listar/apagar, 400/401/404/413/415/429/503, XFF falso não fura o limite (formatos do nginx e do AGC), readyz 200/503, recuperação do banco, desligamento gracioso; cobertura >= 80 % linhas e >= 70 % branches | TLS com o PostgreSQL da Azure, várias réplicas | local, CI (Docker ou `DB_*`) |
 | Testes da página | `test:web` | lista, envio com sucesso e erro, validação, modo admin (fetch simulado), cobertura >= 70 % linhas | navegador real, CSP aplicada pelo navegador | local, CI |
@@ -39,9 +39,13 @@ de um proxy que imita o AGC): é uma verificação local, não um check do harne
 | `test` | `make test` (service `postgres:17-alpine` por digest, `DB_*` no ambiente) | `test` |
 | `images` | build com buildx + cache do GitHub Actions, depois `make tools && make build` com `IMAGES_PREBUILT=1`; as duas imagens viram um artefato | `build` |
 | `e2e` | carrega o artefato, `bash scripts/install-tools.sh kind kubectl`, `make e2e` com `E2E_SKIP_BUILD=1`; diagnósticos como artefato em caso de falha | `e2e` |
+| `e2e-platform` | carrega o artefato, `make e2e-platform` com `E2E_SKIP_BUILD=1`: clona o tx02v2 no commit de `deploy/local/tx02v2.ref`, sobe o lab local completo, faz o deploy GitOps e roda as sondas (`docs/LAB_LOCAL.md`); diagnósticos como artefato | `platform` |
 
 Os ids `static`, `test`, `images` e `e2e` são estáveis: são os checks exigidos pelo ruleset
-(`.github/rulesets/main.json`); o check `policy-workflows` impede que mudem sem querer.
+(`.github/rulesets/main.json`); o check `policy-workflows` impede que mudem sem querer. O
+`e2e-platform` roda em todo PR e precisa estar verde para o merge (disciplina do mantenedor; ainda fora
+do ruleset). Checks novos: `promtool-rules` (estático: `promtool check rules` e `promtool test rules`
+das regras de alerta do overlay `local-platform`) e `platform-e2e` (estágio `platform`).
 
 ## Modo estrito
 

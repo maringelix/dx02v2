@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dx02v2 harness: every check lives here. `make` targets and every CI job only call this script.
-# Usage: scripts/harness.sh <stage>...   stages: static, test, build, e2e, all, list
+# Usage: scripts/harness.sh <stage>...   stages: static, test, build, e2e, platform, all, list
 #   HARNESS_STRICT=1   (set in CI) turns every SKIP into a FAIL
 #   HARNESS_VERBOSE=1  also prints the output of passing checks
 #   HARNESS_ONLY=<re>  runs only the checks whose name matches (local debugging; never in CI)
@@ -9,7 +9,7 @@
 #                      DB_HOST is unset, a throwaway postgres:17-alpine container is started
 #   IMAGE_TAG          tag of the images built/scanned/loaded (default: e2e)
 #   IMAGES_PREBUILT=1  stage build: check images built elsewhere (CI) instead of building them
-#   E2E_SKIP_BUILD=1, KEEP_CLUSTER=1: see scripts/e2e-kind.sh
+#   E2E_SKIP_BUILD=1, KEEP_CLUSTER=1: see scripts/e2e-kind.sh; TX02V2_DIR, KEEP_LAB=1: scripts/e2e-platform.sh
 # Prints "PASS|FAIL|SKIP <check> (<secs>s)" per check and a summary; exits 1 on any FAIL.
 set -euo pipefail
 
@@ -145,6 +145,7 @@ installed_version() {
     kind) out="$(kind version 2>/dev/null)" || out="" ;;
     kubectl) out="$(kubectl version --client 2>/dev/null)" || out="" ;;
     kubelogin) out="$(kubelogin --version 2>/dev/null)" || out="" ;;
+    promtool) out="$(promtool --version 2>/dev/null)" || out="" ;;
   esac
   [[ "$out" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]] && printf '%s' "${BASH_REMATCH[1]}"
   return 0
@@ -647,8 +648,9 @@ check_contract_app() {
   need kubectl node
   [[ -d node_modules ]] || skip "node_modules is missing (check npm-ci)"
   render_overlays "$dir"
-  node scripts/check-manifests.mjs --params "$K8S_PARAMS_EXAMPLE" \
-    local="$dir/local.yaml" azure="$dir/azure.yaml" azure-waf="$dir/azure-waf.yaml" || rc=1
+  node scripts/check-manifests.mjs --params "$K8S_PARAMS_EXAMPLE" --local-params "$K8S_LOCAL_PARAMS_EXAMPLE" \
+    local="$dir/local.yaml" azure="$dir/azure.yaml" azure-waf="$dir/azure-waf.yaml" \
+    local-platform="$dir/local-platform.yaml" || rc=1
   # The deploy reads exactly the contract keys (no more, no less) under the contract prefix.
   grep -qxF 'APPCONFIG_PREFIX=tx02v2/lab/' "$deploy" || {
     echo "$deploy must read the App Configuration prefix tx02v2/lab/ (contract v1)"
@@ -896,6 +898,31 @@ check_kind_e2e() {
   bash scripts/e2e-kind.sh
 }
 
+check_platform_e2e() {
+  need kubectl node git ssh
+  need_docker
+  bash scripts/e2e-platform.sh
+}
+
+# The alert rules of the local-platform component, tested with promtool (series the API exports and
+# kube-state-metrics; docs/HARNESS.md).
+check_promtool_rules() {
+  local dir="$HARNESS_WORK_DIR/promtool"
+  need promtool node
+  [[ -d node_modules ]] || skip "node_modules is missing (check npm-ci)"
+  mkdir -p "$dir"
+  node -e '
+    const { parse } = require("yaml");
+    const fs = require("fs");
+    const docs = fs.readFileSync(process.argv[1], "utf8").split(/^---$/m).map((d) => parse(d));
+    const rule = docs.find((d) => d && d.kind === "PrometheusRule");
+    fs.writeFileSync(process.argv[2], JSON.stringify({ groups: rule.spec.groups }, null, 2));
+  ' deploy/k8s/components/local-platform/monitoring.yaml "$dir/dx02v2.rules.json"
+  cp deploy/k8s/components/local-platform/alerts-test.yaml "$dir/alerts-test.yaml"
+  promtool check rules "$dir/dx02v2.rules.json"
+  (cd "$dir" && promtool test rules alerts-test.yaml)
+}
+
 register_checks() {
   register static tool-versions check_tool_versions
   register static repo-structure check_repo_structure
@@ -917,6 +944,7 @@ register_checks() {
   register static crd-schemas check_crd_schemas
   register static kubeconform check_kubeconform
   register static contract-app check_contract_app
+  register static promtool-rules check_promtool_rules
   register static trivy-config check_trivy_config
   register static gitleaks check_gitleaks
   register test npm-ci check_npm_ci
@@ -931,6 +959,7 @@ register_checks() {
   register build trivy-image:api "check_trivy_image api"
   register build trivy-image:web "check_trivy_image web"
   register e2e kind-e2e check_kind_e2e
+  register platform platform-e2e check_platform_e2e
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -992,10 +1021,11 @@ run_check() {
 list_checks() {
   local i
   echo "stages:"
-  echo "  static  policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, CRD schemas, kubeconform, contract, trivy config, gitleaks"
+  echo "  static  policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, CRD schemas, kubeconform, contract, promtool rules, trivy config, gitleaks"
   echo "  test    API unit + integration tests (real PostgreSQL 17) and web tests, with coverage gates"
   echo "  build   npm build, docker images, image policy, trivy image gate (HIGH/CRITICAL, fixable)"
   echo "  e2e     kind cluster: manifests, PSA restricted, smoke test, NetworkPolicy enforcement"
+  echo "  platform the app on the full tx02v2 local platform (GitOps, mesh, observability, policies, backup, chaos)"
   echo "  all     static + test + build + e2e"
   echo "checks:"
   for i in "${!CHECK_NAME[@]}"; do
@@ -1004,7 +1034,7 @@ list_checks() {
 }
 
 usage() {
-  echo "usage: $0 <stage>...   (stages: static, test, build, e2e, all, list)" >&2
+  echo "usage: $0 <stage>...   (stages: static, test, build, e2e, platform, all, list)" >&2
   exit 2
 }
 
@@ -1016,7 +1046,7 @@ main() {
   register_checks
   for arg in "$@"; do
     case "$arg" in
-      static | test | build | e2e) stages+=("$arg") ;;
+      static | test | build | e2e | platform) stages+=("$arg") ;;
       all) stages+=(static test build e2e) ;;
       list)
         list_checks

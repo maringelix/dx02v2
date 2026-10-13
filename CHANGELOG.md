@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The app on the full local platform of tx02v2 (docs/LAB_LOCAL.md), ported from `dx01v2`: overlay
+  `local-platform` (Istio Gateway with HTTPS from cert-manager, HTTPRoutes, ExternalSecrets from
+  `local-secrets`, HPA, `PeerAuthentication` STRICT, `AuthorizationPolicy` by identity, NetworkPolicies
+  with HBONE, ServiceMonitor, five alert rules, a Grafana dashboard); `scripts/deploy-local.sh` (images
+  to the lab registry, GitOps repository, Argo CD Application); `scripts/e2e-platform.sh` with probes
+  (smoke over HTTPS through the emulated load balancer, mesh, observability, Trivy reports, HPA,
+  database backup + restore drill, Argo CD self-heal, chaos experiment). Harness checks
+  `promtool-rules` (tool promtool 3.15.0) and `platform-e2e` (stage `platform`, `make e2e-platform`,
+  CI job `e2e-platform`); `contract-app` asserts the new overlay. The platform e2e is
+  verified locally (13 probes on the tx02v2 local lab, from scratch).
+- `e2e/smoke.mjs`: `SMOKE_EDGE=istio` for the Istio Gateway of the local platform, which routes `/api`
+  straight to the API like AGC and keeps an external `X-Request-Id` like nginx (Azure-specific: the
+  `dx01v2` smoke accepts both API CSPs and has no edge modes).
+
 - Initial v2 of the Azure application lab, started from every tracked file of `dx01v2` at commit
   `22e69c4` (the same app on both clouds, docs/ARQUITETURA.md) and adapted to the AKS cluster of
   `tx02v2` (contract v1, docs/CONTRATO.md):

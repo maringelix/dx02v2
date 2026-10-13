@@ -4,7 +4,7 @@
 
 # Install order; also the list accepted by both scripts.
 # shellcheck disable=SC2034 # used by the scripts that source this file
-TOOLS_ALL=(trivy hadolint actionlint shellcheck kubeconform gitleaks kind kubectl kubelogin)
+TOOLS_ALL=(trivy hadolint actionlint shellcheck kubeconform gitleaks kind kubectl kubelogin promtool)
 # shellcheck disable=SC2034
 TOOLS_PLATFORMS=(linux_amd64 linux_arm64 darwin_arm64)
 
@@ -74,6 +74,7 @@ tool_artifact() {
     kind) printf 'kind-%s-%s' "$os" "$arch" ;;
     kubectl) printf 'kubectl' ;;
     kubelogin) printf 'kubelogin-%s-%s.zip' "$os" "$arch" ;;
+    promtool) printf 'prometheus-%s.%s-%s.tar.gz' "$v" "$os" "$arch" ;;
     *) die "unknown tool: $tool" ;;
   esac
 }
@@ -92,6 +93,7 @@ tool_url() {
     kind) printf '%s/kubernetes-sigs/kind/releases/download/v%s/%s' "$gh" "$v" "$a" ;;
     kubectl) printf 'https://dl.k8s.io/release/v%s/bin/%s/%s/kubectl' "$v" "$os" "$arch" ;;
     kubelogin) printf '%s/Azure/kubelogin/releases/download/v%s/%s' "$gh" "$v" "$a" ;;
+    promtool) printf '%s/prometheus/prometheus/releases/download/v%s/%s' "$gh" "$v" "$a" ;;
     *) die "unknown tool: $tool" ;;
   esac
 }
@@ -110,6 +112,7 @@ tool_checksum_url() {
     kind) printf '%s.sha256sum' "$(tool_url "$tool" "$v" "$p")" ;;
     kubectl) printf '%s.sha256' "$(tool_url "$tool" "$v" "$p")" ;;
     kubelogin) printf '%s.sha256' "$(tool_url "$tool" "$v" "$p")" ;;
+    promtool) printf '%s/prometheus/prometheus/releases/download/v%s/sha256sums.txt' "$gh" "$v" ;;
     *) die "unknown tool: $tool" ;;
   esac
 }
@@ -133,6 +136,7 @@ tool_extract() {
   case "$tool" in
     shellcheck) src="$work/shellcheck-v$v/shellcheck" ;;
     kubelogin) src="$work/bin/$3/kubelogin" ;;
+    promtool) src="$work/prometheus-$v.${3/_/-}/promtool" ;;
     *) src="$work/$tool" ;;
   esac
   [[ -f "$src" ]] || die "binary for $tool not found inside $(basename "$archive")"

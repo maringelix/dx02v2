@@ -1,10 +1,12 @@
 // End-to-end smoke test through the entry point: the web nginx locally and on kind, Application
-// Gateway for Containers (AGC) on Azure.
+// Gateway for Containers (AGC) on Azure, the Istio Gateway on the tx02v2 local platform.
 //   BASE_URL=http://127.0.0.1:18080 ADMIN_TOKEN=... node e2e/smoke.mjs
 // Optional: SMOKE_WAIT_SECONDS (wait for /healthz and /api/info, plus GET retries; default 0),
 //           SMOKE_MAX_WRITES (attempts to reach the rate limit; default 60),
 //           SMOKE_EDGE (what routes /api to the API: `nginx`, the default, for compose and kind;
-//           `agc` for Azure, where /api goes straight to the API and AGC replaces X-Request-Id).
+//           `agc` for Azure, where /api goes straight to the API and AGC replaces X-Request-Id;
+//           `istio` for the Istio Gateway of the tx02v2 local lab, where /api goes straight to the
+//           API and an external X-Request-Id is kept, as behind nginx).
 // The rate-limit check runs last: it uses up this client's write budget for a minute.
 import { randomUUID } from 'node:crypto';
 import { assert, assertEqual, choiceEnv, http, intEnv, requiredEnv, Runner, waitForOk } from './lib.mjs';
@@ -13,16 +15,16 @@ const BASE_URL = requiredEnv('BASE_URL');
 const ADMIN_TOKEN = requiredEnv('ADMIN_TOKEN');
 const WAIT_SECONDS = intEnv('SMOKE_WAIT_SECONDS', 0);
 const MAX_WRITES = intEnv('SMOKE_MAX_WRITES', 60);
-const EDGE = choiceEnv('SMOKE_EDGE', ['nginx', 'agc']);
+const EDGE = choiceEnv('SMOKE_EDGE', ['nginx', 'agc', 'istio']);
 const RETRIES = WAIT_SECONDS > 0 ? 5 : 0;
 const HTTPS = new URL(BASE_URL).protocol === 'https:';
 
 const WEB_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
   "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
-// Behind nginx /api responses carry the web policy (nginx hides the API's own); behind AGC, which
-// routes /api straight to the API, they carry the API's policy.
-const API_CSP = EDGE === 'agc' ? "default-src 'none';frame-ancestors 'none'" : WEB_CSP;
+// Behind nginx /api responses carry the web policy (nginx hides the API's own); behind AGC or the
+// Istio Gateway, which route /api straight to the API, they carry the API's policy.
+const API_CSP = EDGE === 'nginx' ? WEB_CSP : "default-src 'none';frame-ancestors 'none'";
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WEB_HEADERS = {
   'content-security-policy': WEB_CSP,
@@ -181,8 +183,9 @@ await run.check('DELETE needs the admin token: 401 without/wrong, 204 with it', 
 });
 
 await run.check('oversized bodies and unknown routes get JSON errors', async () => {
-  // nginx (64k) or, behind AGC, the API itself (10 kb) answers with the same JSON 413: the WAF
-  // policy of tx02v2 inspects bodies up to 128 KB, so 70 KB reaches the API (contract v1).
+  // nginx (64k) or, behind AGC or the Istio Gateway, the API itself (10 kb) answers with the same
+  // JSON 413: the WAF policy of tx02v2 inspects bodies up to 128 KB, so 70 KB reaches the API
+  // (contract v1).
   const oversized = await post({ author: 'smoke', text: 'x'.repeat(70 * 1024) });
   assertErrorBody(oversized, 413, 'payload_too_large', '70 kb');
   assertErrorBody(await get('/api/does-not-exist'), 404, 'not_found', 'unknown API route');

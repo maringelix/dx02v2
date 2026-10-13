@@ -154,6 +154,21 @@ então o contrato continua na versão 1; ficam aqui como registro de por que o t
    um laptop) recebe os mesmos papéis Azure da `dx02v2-gha-deploy` (AcrPush, Azure Kubernetes Service
    Cluster User Role e App Configuration Data Reader) além da RoleBinding.
 
+## Lab local (contrato local do tx02v2, versão 1)
+
+O deploy local (scripts/deploy-local.sh, docs/LAB_LOCAL.md) lê o ConfigMap `lab-system/lab-contract`
+da plataforma local do tx02v2 e recusa valores diferentes dos fixados no overlay `local-platform`:
+`registry` = `registry.tx02v2.local`, `db.secret-name` = `tx02v2-lab-db-app`,
+`app.admin-token-secret-name` = `tx02v2-lab-app-admin-token` (chave `token`; no Key Vault é uma string
+pura), `eso.cluster-secret-store` = `local-secrets`, `gateway.class` = `istio`, `tls.cluster-issuer` =
+`lab-ca`, `argocd.project` = `dx02v2`, `monitoring.prometheus-service-account` =
+`monitoring/kube-prometheus-stack-prometheus`. Do contrato ele lê ainda `registry-push`
+(`localhost:5002`), `network-cidr` (`10.251.0.0/24`), `db.endpoint-ip` (`10.251.0.11`),
+`db.ca-configmap`, `gitops.push-url`, `gitops.read-url` e `gitops.push-key-secret`. O overlay só usa os
+kinds que o AppProject `dx02v2` aceita (check `contract-app`). Diferença de borda: o Gateway local
+mantém um `X-Request-Id` externo (`SMOKE_EDGE=istio`); o AGC gera o próprio. A fonte da verdade é o
+`docs/CONTRATO.md` do tx02v2.
+
 ## Mudando o contrato
 
 1. Abra PRs nos dois repositórios, com links cruzados, e incremente a versão no título dos dois
