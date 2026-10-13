@@ -211,6 +211,21 @@ jobs:
           E2E_SKIP_BUILD: '1'
           E2E_DIAGNOSTICS_DIR: ${{ runner.temp }}/platform-diagnostics
 
+      # The job log keeps only the tail of the run (the destroy); the full log shows the failed probe.
+      # Sensitive Terraform values are never printed, and the lab credentials die with the runner.
+      - name: Keep the full platform e2e log
+        if: failure()
+        env:
+          DIAG_DIR: ${{ runner.temp }}/platform-diagnostics
+          E2E_LOG: /tmp/dx02v2-harness/logs/platform-e2e.log
+        run: |
+          mkdir -p "$DIAG_DIR"
+          if [[ -f "$E2E_LOG" ]]; then
+            cp "$E2E_LOG" "$DIAG_DIR/"
+          else
+            echo "no platform e2e log to keep"
+          fi
+
       - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

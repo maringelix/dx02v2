@@ -284,12 +284,22 @@ check_observability() {
     [[ "$body" == *"\"$rule\""* ]] || die "observability: alert rule $rule not loaded by Prometheus"
   done
   pass "observability: the five dx02v2 alert rules are loaded"
-  body="$(prom_query query 'query=sum(rate(http_request_duration_seconds_count{namespace="dx02v2",route="/api/messages"}[5m]))')"
+  # The smoke traffic shows up after the next scrapes (the CI of dx01v2 got here before them once).
+  for _ in $(seq 1 20); do
+    body="$(prom_query query 'query=sum(rate(http_request_duration_seconds_count{namespace="dx02v2",route="/api/messages"}[5m]))')"
+    [[ "$body" == *'"result":[{'* ]] && break
+    sleep 6
+  done
   [[ "$body" == *'"result":[{'* ]] || die "observability: no request metrics of /api/messages"
   pass "observability: request metrics of the smoke traffic are in Prometheus"
   user="$(kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-user}' | base64 -d)"
   pass="$(kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)"
-  body="$(curl_probe "http://kube-prometheus-stack-grafana.monitoring.svc/api/dashboards/uid/dx02v2-app" -u "$user:$pass")"
+  # The Grafana sidecar loads the dashboard ConfigMap on its own schedule.
+  for _ in $(seq 1 20); do
+    body="$(curl_probe "http://kube-prometheus-stack-grafana.monitoring.svc/api/dashboards/uid/dx02v2-app" -u "$user:$pass")"
+    [[ "$(tail -n 1 <<<"$body")" == 200 ]] && break
+    sleep 6
+  done
   [[ "$(tail -n 1 <<<"$body")" == 200 ]] || die "observability: Grafana does not serve the dx02v2 dashboard"
   pass "observability: Grafana loaded the dx02v2 dashboard from its ConfigMap"
   for _ in $(seq 1 30); do

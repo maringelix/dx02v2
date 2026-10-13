@@ -20,8 +20,7 @@ make e2e-platform    # sobe o lab do tx02v2, faz o deploy, roda as sondas e dest
 O script clona o tx02v2 no commit de `deploy/local/tx02v2.ref`; com `TX02V2_DIR=<checkout>` ele usa
 um checkout seu. `KEEP_LAB=1` mantém o lab no fim (`bash <tx02v2>/scripts/local-lab.sh down` depois).
 Dentro de um contêiner que usa o Docker do host, exporte `LOCAL_KIND_INTERNAL=1`. Precisa de Docker com
-8 GB de memória. O `deploy/local/tx02v2.ref` ainda tem o placeholder de 40 zeros: até o lab local do
-tx02v2 chegar à `main` dele, rode com `TX02V2_DIR`.
+8 GB de memória.
 
 Com o lab do tx02v2 já de pé (`make local-up` lá), o deploy sozinho:
 
