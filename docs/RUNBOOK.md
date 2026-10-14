@@ -154,6 +154,11 @@ kubectl -n dx02v2 get healthcheckpolicy,webapplicationfirewallpolicy
 curl -fsS "http://$(kubectl -n dx02v2 get gateway dx02v2 -o jsonpath='{.status.addresses[0].value}')/api/info"
 ```
 
+Traces (contrato v2): depois de algumas requisições, o serviço `dx02v2-api` aparece no Application
+Insights `tx02v2-lab-traces` (Transaction search). O caminho é API →
+`opentelemetry-collector.observability` (OTLP/HTTP, porta 4318) → Application Insights; o Collector, a
+identidade e o papel são do tx02v2.
+
 ## 9. Desligar
 
 O teardown é o do tx02v2 (workflow de destroy + checagem de sobras), que remove o AGC, o AKS, o
@@ -180,6 +185,7 @@ cobrando).
 | Smoke com 403 em tudo | regra do WAF (Bot Manager, regra personalizada) | logs do WAF no tx02v2; nenhuma regra pode bloquear o smoke (contrato) |
 | Smoke falha em `X-Request-Id` | o AGC não substituiu o `x-request-id` como a documentação descreve | registre no `cloud_run_report`; a asserção muda nos dois repositórios só com evidência |
 | `ImagePullBackOff` | a identidade kubelet do AKS sem `AcrPull` no registry | o tx02v2 atribui esse papel no apply (contrato); confira o apply e as atribuições do registry |
+| Nenhum trace no Application Insights | Collector ausente (plataforma antiga do tx02v2, contrato v1) ou o Entra ID recusou a ingestão | `kubectl -n observability get pods`; logs do Collector (`kubectl -n observability logs deployment/opentelemetry-collector`); a API nunca falha por isso: os spans só se perdem |
 
 ## 11. Registro
 

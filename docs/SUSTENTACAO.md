@@ -17,7 +17,7 @@ descrita lá.
   `e2e` verdes no GitHub) e também em containers Linux locais.
 - Deploy na Azure: `não executado em nuvem (v2)`; `scripts/deploy-azure.sh` foi exercitado só com
   `az`/`kubectl`/`kubelogin`/`docker` simulados.
-- Contrato com o tx02v2: versão 1 (`docs/CONTRATO.md`), espelho da parte do app do
+- Contrato com o tx02v2: versão 2 de 2026-10-14, com o endpoint OTLP do Collector (`docs/CONTRATO.md`), espelho da parte do app do
   `docs/CONTRATO.md` do tx02v2; as notas de implementação foram incorporadas ao contrato antes da
   primeira publicação do tx02v2.
 - App: o do `dx01v2` no commit `22e69c4`, com as diferenças da seção 5.10.
@@ -43,6 +43,7 @@ descrita lá.
 | TypeScript | 6.0.3 | sem data publicada | [typescript-eslint: versões suportadas](https://typescript-eslint.io/users/dependency-versions) | Manter dentro de `>=4.8.4 <6.1.0` (typescript-eslint 8.71); o `dependabot.yml` ignora minors e majors do `typescript` |
 | React / Vite / Vitest | 19.3 / 8.3 / 5.0 | sem calendário publicado | react.dev, vite.dev, vitest.dev | Majors chegam como PRs individuais do Dependabot; ler o guia de migração |
 | Express | 5.3 | linha 5.x ativa | [política de suporte do Express](https://expressjs.com/en/support/) | Acompanhar pelo Dependabot |
+| OpenTelemetry JS (`@opentelemetry/api` 1.9.1, `sdk-trace-node` e `resources` 2.12.0, `exporter-trace-otlp-http` 0.223.0, `semantic-conventions` 1.43.0) | API 1.x estável; SDK 2.x; o exporter ainda é 0.x (experimental) | sem calendário; correções só na linha atual | [opentelemetry-js](https://github.com/open-telemetry/opentelemetry-js/releases) | Subir os pacotes juntos (o SDK 2.x e o exporter 0.2xx saem na mesma release), nos três repositórios de app; um minor do exporter pode quebrar: rode os testes `telemetry` e `tracing` e o `e2e-platform` |
 | PostgreSQL | 17 (`postgres:17-alpine`, imagem com 17.11) | 2029-11-08 (comunidade) | [versionamento do PostgreSQL](https://www.postgresql.org/support/versioning/) | A major segue o PostgreSQL Flexible Server do tx02v2 (contrato); trocar compose, CI, kind e harness juntos |
 | nginx (web) | 1.30 estável (`nginxinc/nginx-unprivileged:1.30.5-alpine3.24-slim`) | até a próxima estável (1.32, prevista para ~abril de 2027) | [nginx.org](https://nginx.org/en/download.html) | Mudar para a nova linha estável na revisão trimestral seguinte ao lançamento |
 | Alpine (build e runtime do web) | 3.24 | ~2028-05 | [releases do Alpine](https://alpinelinux.org/releases/) | Acompanha os digests do node e do nginx-unprivileged |

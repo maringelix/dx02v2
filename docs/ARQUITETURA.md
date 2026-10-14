@@ -125,10 +125,12 @@ liberam a subnet do AGC, e não o nó.
    `/readyz` faz `SELECT 1` com limite de 1 s e volta a 200 quando o banco volta.
 9. **Migrações explícitas.** Arquivos SQL numerados, uma transação por arquivo, `pg_advisory_lock` e
    checksum em `schema_migrations`. Rodam no initContainer `migrate` e no serviço `migrate` (compose).
-10. **Desligamento gracioso.** SIGTERM → `/readyz` 503 → `server.close()` → `pool.end()`; saída
-    forçada após `SHUTDOWN_TIMEOUT_MS` (10 s); `preStop` com a ação `sleep` de 5 s.
-11. **Métricas separadas.** `/metrics` na porta 9464; nem o web nem o Gateway expõem essa porta; a
-    NetworkPolicy só aceita o namespace `monitoring` (não há Prometheus neste lab).
+10. **Desligamento gracioso.** SIGTERM → `/readyz` 503 → `server.close()` → `pool.end()` → flush dos
+    spans pendentes (no máximo 5 s; um Collector fora do ar não transforma o desligamento em falha);
+    saída forçada após `SHUTDOWN_TIMEOUT_MS` (10 s); `preStop` com a ação `sleep` de 5 s.
+11. **Métricas separadas.** `/metrics` na porta 9464, no formato OpenMetrics (o exemplar leva o
+    `trace_id` da requisição); nem o web nem o Gateway expõem essa porta; a NetworkPolicy só aceita o
+    namespace `monitoring` (não há Prometheus neste lab).
 12. **Gateway API no Application Gateway for Containers.** O ingress-nginx upstream foi aposentado em
     2026-03 e o add-on de roteamento NGINX do AKS só tem suporte até novembro de 2026; o AGC é GA,
     fala Gateway API e funciona com Azure CNI Overlay. Modo "bring your own": o tx02v2 cria o AGC, o
@@ -168,6 +170,12 @@ liberam a subnet do AGC, e não o nó.
     em `/api` e o `X-Request-Id` ecoado; `SMOKE_EDGE=agc` espera a CSP da própria API em `/api` e o
     GUID que o AGC atribui a cada requisição. O corpo de 70 KB recebe 413 nos dois: do nginx (64k) ou,
     atrás do AGC, da própria API (a política de WAF do tx02v2 inspeciona até 128 KB).
+21. **Traces com OpenTelemetry, sem loader.** A API cria os próprios spans (SERVER por requisição,
+    CLIENT por consulta dentro dela) com a API e o SDK oficiais do OpenTelemetry, em vez da
+    auto-instrumentação, que no ESM exige um hook de carregamento de módulos. Spans em OTLP/HTTP para o
+    Collector da plataforma do tx02v2 (`OTEL_EXPORTER_OTLP_ENDPOINT`; desligado sem ele), que os grava no
+    Application Insights; W3C trace context, e o trace id nos logs (`trace_id`, `span_id`) e nos
+    exemplars. As sondas `/healthz` e `/readyz` não geram span. O mesmo código do dx01v2.
 
 ### Riscos conhecidos do caminho Azure
 
@@ -186,7 +194,8 @@ liberam a subnet do AGC, e não o nó.
 
 | Aspecto | dx01v2 (AWS) | dx02v2 (Azure) |
 |---|---|---|
-| App (`api/`, `web/`, migrações) | commit `22e69c4` | o mesmo; só nomes (`dx01v2` → `dx02v2`, inclusive `/api/info`, logs, realm e chave do advisory lock) e comentários |
+| App (`api/`, `web/`, migrações) | commit `22e69c4` + traces com OpenTelemetry (2026-10-14) | o mesmo; só nomes (`dx01v2` → `dx02v2`, inclusive `/api/info`, logs, realm, chave do advisory lock e o serviço `dx02v2-api` dos spans) e comentários |
+| Traces | Collector do tx01v2 → AWS X-Ray | Collector do tx02v2 → Application Insights (Entra ID) |
 | Testes | suíte do commit `22e69c4` | a mesma (nomes e um caminho de exemplo trocados), mais 1 caso de integração (`X-Forwarded-For` sem espaço, formato do AGC) |
 | Smoke test | `SMOKE_BEHIND_WAF=1`: 403 do WAF acima de 8 KB | `SMOKE_EDGE=agc`: CSP da API em `/api`, `X-Request-Id` do AGC, 413 da API; compose e kind com as mesmas asserções de antes (a CSP em `/api` agora é exata) |
 | Cluster | EKS 1.36 (tx01v2), access entries | AKS 1.36 (tx02v2), Entra ID; kubeconfig via `az aks get-credentials` + `kubelogin` |

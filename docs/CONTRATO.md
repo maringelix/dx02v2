@@ -1,4 +1,7 @@
-# Contrato tx02v2 <-> dx02v2 — versão 1 (2026-10-11)
+# Contrato tx02v2 <-> dx02v2 — versão 2 (2026-10-14)
+
+Versão 2: o OpenTelemetry Collector da camada de plataforma do tx02v2 recebe os traces do app. A versão
+1 (2026-10-11) não tinha traces.
 
 Interface entre a infraestrutura (`tx02v2`) e a aplicação (este repositório), na parte que o app usa.
 A fonte da verdade é o
@@ -11,6 +14,7 @@ repositórios e incremento da versão.
 | O quê | Onde | Status |
 |---|---|---|
 | Nomes de Services, portas, probes, Secrets, ConfigMap, Gateway (classe, anotação, frontend, listener), HTTPRoute (rotas), HealthCheckPolicies, WebApplicationFirewallPolicy, ExternalSecrets, HPA, NetworkPolicies, labels, só tipos que a Role `dx02v2-deployer` pode escrever | check `contract-app` (`scripts/check-manifests.mjs` sobre os overlays renderizados `azure` e `azure-waf`) | `verificado localmente` |
+| Endpoint OTLP da versão 2 no ConfigMap da API e NetworkPolicy só até o Collector (namespace `observability`, porta 4318) | check `contract-app` | `verificado localmente` |
 | Manifests válidos para Kubernetes 1.36, para os CRDs do ALB Controller 1.12.2 (Gateway API v1.5.1 standard, `alb.networking.azure.io/v1`) e para o CRD `ExternalSecret` (`external-secrets.io/v1`) | checks `crd-schemas` e `kubeconform` (estrito) | `verificado localmente` |
 | O deploy lê exatamente as 15 chaves abaixo, com o prefixo `tx02v2/lab/`, confere os valores fixos e monta o `azure-pg-ca` com as três raízes do contrato (thumbprints SHA-1 conferidos) | check `contract-app` (sobre `scripts/deploy-azure.sh`) | `verificado localmente` |
 | Formatos dos valores da App Configuration (imagens no ACR, ID e frontend do AGC, ID da política de WAF ou `none`, CIDRs das subnets) | `k8s_validate_params` em `scripts/lib/k8s.sh` e `scripts/deploy-azure.sh` | `verificado localmente` |
@@ -28,6 +32,7 @@ repositórios e incremento da versão.
 | Cluster AKS | `tx02v2-lab`, Kubernetes `1.36`, contas locais desligadas, Entra ID com Azure RBAC, OIDC issuer e workload identity, Azure CNI Overlay com dataplane Cilium (aplica NetworkPolicy) |
 | Namespace do app | `dx02v2` — criado pela camada de plataforma do tx02v2 com os labels `pod-security.kubernetes.io/enforce=restricted` e `pod-security.kubernetes.io/enforce-version=latest`. Os overlays `azure*` não criam o namespace; o overlay `local` cria um equivalente para o kind |
 | RBAC Kubernetes do deployer | Role `dx02v2-deployer` + RoleBinding `dx02v2-deployers` no namespace `dx02v2`; sujeito `kind: User` com o object ID da identidade `dx02v2-gha-deploy` (mais os object IDs de `app_deployer_principal_ids`) |
+| Traces (OpenTelemetry) | `http://opentelemetry-collector.observability.svc:4318` (OTLP/HTTP; `OTEL_EXPORTER_OTLP_ENDPOINT` do componente `azure`). O Collector é instalado pela camada de plataforma do tx02v2 e grava os spans no Application Insights `tx02v2-lab-traces` com a identidade `tx02v2-lab-otel`; o app não recebe nenhum papel Azure para isso |
 | ACR | `tx02v2lab<sufixo>`, Basic, usuário admin e pull anônimo desligados; repositórios `dx02v2/api` e `dx02v2/web`; tag = SHA git completo (40 caracteres) do dx02v2. O Basic não tem imutabilidade de tags: o deploy recusa sobrescrever uma tag existente |
 | Identidade OIDC do deploy | `dx02v2-gha-deploy` (user-assigned, no grupo `tx02v2-bootstrap`) |
 
@@ -154,15 +159,18 @@ então o contrato continua na versão 1; ficam aqui como registro de por que o t
    um laptop) recebe os mesmos papéis Azure da `dx02v2-gha-deploy` (AcrPush, Azure Kubernetes Service
    Cluster User Role e App Configuration Data Reader) além da RoleBinding.
 
-## Lab local (contrato local do tx02v2, versão 1)
+## Lab local (contrato local do tx02v2, versão 2)
 
 O deploy local (scripts/deploy-local.sh, docs/LAB_LOCAL.md) lê o ConfigMap `lab-system/lab-contract`
-da plataforma local do tx02v2 e recusa valores diferentes dos fixados no overlay `local-platform`:
+da plataforma local do tx02v2, exige a versão `2` e recusa valores diferentes dos fixados no overlay
+`local-platform`:
 `registry` = `registry.tx02v2.local`, `db.secret-name` = `tx02v2-lab-db-app`,
 `app.admin-token-secret-name` = `tx02v2-lab-app-admin-token` (chave `token`; no Key Vault é uma string
 pura), `eso.cluster-secret-store` = `local-secrets`, `gateway.class` = `istio`, `tls.cluster-issuer` =
 `lab-ca`, `argocd.project` = `dx02v2`, `monitoring.prometheus-service-account` =
-`monitoring/kube-prometheus-stack-prometheus`. Do contrato ele lê ainda `registry-push`
+`monitoring/kube-prometheus-stack-prometheus`, `tracing.otlp-endpoint` =
+`http://opentelemetry-collector.monitoring.svc:4318` (versão 2: o `OTEL_EXPORTER_OTLP_ENDPOINT` da API
+e as NetworkPolicies até o Collector). Do contrato ele lê ainda `registry-push`
 (`localhost:5002`), `network-cidr` (`10.251.0.0/24`), `db.endpoint-ip` (`10.251.0.11`),
 `db.ca-configmap`, `gitops.push-url`, `gitops.read-url` e `gitops.push-key-secret`. O overlay só usa os
 kinds que o AppProject `dx02v2` aceita (check `contract-app`). Diferença de borda: o Gateway local
