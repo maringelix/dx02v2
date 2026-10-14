@@ -126,7 +126,7 @@ aparece com `npm run test:coverage` à mão). `make clean` remove tudo isso.
 | `FAIL crd-schemas` | arquivo de `deploy/k8s/schemas` editado à mão, ou o gerador mudou | `scripts/update-crd-schemas.sh <versão de source.env>` e commit do resultado |
 | `FAIL crd-schemas ... download failed` / `digest mismatch` | sem rede, ou o registry da Microsoft devolveu outro conteúdo | confira a rede; um digest diferente nunca é aceito (pare e investigue) |
 | `FAIL kubeconform ... could not find schema` | sem rede, ou schema do catálogo que o kubeconform não compila | confira a rede; os commits dos catálogos estão fixados em `scripts/harness.sh` |
-| `FAIL contract-app` | manifest ou `scripts/deploy-azure.sh` divergente do contrato v1 ou do hardening | corrija; mudança de contrato exige PR coordenado com o tx02v2 |
+| `FAIL contract-app` | manifest ou `scripts/deploy-azure.sh` divergente do contrato v2 ou do hardening | corrija; mudança de contrato exige PR coordenado com o tx02v2 |
 | `FAIL policy-cloud` | algo do caminho da outra nuvem (nome de arquivo, serviço, região) fora de README, ARQUITETURA e CHANGELOG | remova ou descreva em termos da Azure |
 | `FAIL kind-e2e` | rollout, smoke ou sonda falhou | leia o resumo e os diagnósticos (`E2E_DIAGNOSTICS_DIR`, artefato `e2e-diagnostics` no CI); `KEEP_CLUSTER=1 make e2e` para investigar |
 | `FAIL gitleaks` | segredo ou falso positivo | remova o segredo e gire a credencial; placeholders devem ter cara de placeholder (por exemplo SHA ou GUID só com zeros). Antes do primeiro commit o check examina os arquivos visíveis ao git |

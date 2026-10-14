@@ -1,4 +1,4 @@
-# AKS (tx02v2, contract v1). Namespace-scoped resources only: the dx02v2 namespace, the
+# AKS (tx02v2, contract v2). Namespace-scoped resources only: the dx02v2 namespace, the
 # ClusterSecretStore, the ALB Controller, Application Gateway for Containers and the deployer RBAC
 # belong to tx02v2. Values read from App Configuration at deploy time (images, AGC ID and frontend,
 # subnet CIDRs) arrive through params.env (gitignored, written by scripts/deploy-azure.sh into a
@@ -41,6 +41,11 @@ patches:
       - op: add
         path: /data/DB_SSL_CA_FILE
         value: /etc/azure-pg-ca/ca.pem
+      # Traces to the OpenTelemetry Collector of the platform layer of tx02v2 (contract v2), which
+      # writes them to Application Insights.
+      - op: add
+        path: /data/OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://opentelemetry-collector.observability.svc:4318
   # The HPA owns the replica count (2-4); keeping spec.replicas would reset it on every deploy.
   # ConfigMap azure-pg-ca: the Azure root CAs, created by scripts/deploy-azure.sh (contract v1).
   - target:
