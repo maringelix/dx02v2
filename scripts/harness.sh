@@ -70,7 +70,7 @@ REQUIRED_FILES=(
   scripts/update-crd-schemas.sh scripts/crd-to-jsonschema.mjs scripts/check-manifests.mjs
   deploy/k8s/components/azure/params.example.env deploy/k8s/schemas/source.env
 )
-STABLE_CI_JOBS=(static test images e2e)
+STABLE_CI_JOBS=(static test images e2e e2e-platform)
 
 # ---------------------------------------------------------------------------------------------
 # Check registry and helpers
