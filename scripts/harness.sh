@@ -9,7 +9,7 @@
 #                      DB_HOST is unset, a throwaway postgres:17-alpine container is started
 #   IMAGE_TAG          tag of the images built/scanned/loaded (default: e2e)
 #   IMAGES_PREBUILT=1  stage build: check images built elsewhere (CI) instead of building them
-#   E2E_SKIP_BUILD=1, KEEP_CLUSTER=1: see scripts/e2e-kind.sh; TX02V2_DIR, KEEP_LAB=1: scripts/e2e-platform.sh
+#   E2E_SKIP_BUILD=1, KEEP_CLUSTER=1: see scripts/e2e-kind.sh; TX02V2_DIR, TX02V2_REPO, KEEP_LAB=1: scripts/e2e-platform.sh
 # Prints "PASS|FAIL|SKIP <check> (<secs>s)" per check and a summary; exits 1 on any FAIL.
 set -euo pipefail
 
@@ -53,7 +53,7 @@ CONTRACT_PG_CA_THUMBPRINTS=(
 )
 
 REQUIRED_FILES=(
-  README.md README.pt-BR.md AGENTS.md CLAUDE.md CONTRIBUTING.md SECURITY.md CHANGELOG.md LICENSE
+  README.md README.pt-BR.md AGENTS.md CLAUDE.md CONTRIBUTING.md SECURITY.md CHANGELOG.md LICENSE FORK.md
   .editorconfig .gitattributes .gitignore .pre-commit-config.yaml Makefile .trivyignore.yaml
   .nvmrc .npmrc .prettierrc .prettierignore eslint.config.js package.json package-lock.json
   .dockerignore api/Dockerfile api/Dockerfile.dockerignore web/Dockerfile web/Dockerfile.dockerignore

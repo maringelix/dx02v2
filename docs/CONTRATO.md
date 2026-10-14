@@ -50,7 +50,7 @@ conter (o check `contract-app` recusa qualquer outro tipo):
 
 Credencial federada da identidade `dx02v2-gha-deploy`: issuer `https://token.actions.githubusercontent.com`,
 audience `api://AzureADTokenExchange`, sujeito exato `repo:<owner>/dx02v2:environment:lab` (dono
-configurável no tx02v2, padrão `maringelix`). Por isso o job do `deploy-azure.yml` usa
+configurável no tx02v2, `github_owner`, sem padrão). Por isso o job do `deploy-azure.yml` usa
 `environment: lab` (o check `policy-workflows` exige).
 
 Papéis Azure de `dx02v2-gha-deploy` (atribuídos pelo root do lab do tx02v2): `AcrPush` no registry;

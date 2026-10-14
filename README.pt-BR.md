@@ -6,6 +6,8 @@ Metade de aplicação do lab de DevOps na Azure: um mural de mensagens pequeno (
 
 [English](README.md)
 
+**Fork do lab:** o [FORK.md](FORK.md) (em inglês) leva você do fork ao lab rodando, primeiro na sua máquina, depois na sua conta de nuvem.
+
 ## O que é
 
 Um lab público e educacional para clonar ou fazer fork e aprender como um app web pequeno é
@@ -138,6 +140,7 @@ Application Gateway for Containers → destroy do tx02v2 + checagem de sobras �
 
 | Documento | Conteúdo |
 |---|---|
+| [FORK.md](FORK.md) | fork do lab (em inglês): o que o GitHub não copia, o lab local, a sua conta de nuvem |
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | diagramas (local, kind, Azure), decisões, dx01v2 ↔ dx02v2, v1 → v2 |
 | [docs/API.md](docs/API.md) | endpoints, erros, exemplos em curl |
 | [docs/CONTRATO.md](docs/CONTRATO.md) | contrato tx02v2 ⇄ dx02v2 v1 (lado do app; fonte da verdade no tx02v2) |

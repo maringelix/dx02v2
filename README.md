@@ -6,6 +6,8 @@ Application half of the Azure DevOps lab: a small message board (Express 5 API, 
 
 [Português](README.pt-BR.md)
 
+**Fork this lab:** [FORK.md](FORK.md) takes you from a fork to a running lab, on your machine first, then in your own cloud account.
+
 ## What is this
 
 A public, educational lab you can clone or fork to learn how a small web app is built, tested,
@@ -138,6 +140,7 @@ All docs are in Brazilian Portuguese.
 
 | Doc | Content |
 |---|---|
+| [FORK.md](FORK.md) | fork the lab: what GitHub does not copy, the local lab, your own cloud account |
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | diagrams (local, kind, Azure), decisions, dx01v2 ↔ dx02v2, v1 → v2 |
 | [docs/API.md](docs/API.md) | endpoints, errors, curl examples |
 | [docs/CONTRATO.md](docs/CONTRATO.md) | tx02v2 ⇄ dx02v2 contract v1 (app side; source of truth in tx02v2) |
