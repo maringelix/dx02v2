@@ -19,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `deploy/local/tx02v2.ref` follows tx02v2 to `c92def2` (tx02v2#10, the debts round of the roadmap).
+- Comments, script messages and docs say "the contract" or point to `docs/CONTRATO.md` instead of
+  "contract v1": the contract has been at version 2 since round 1 (roadmap S.8); the README says that HTTPS on the gateway listener is outside contract v2.
 - The family table of both READMEs links the family hub `tx00v2` (roadmap, family guardrails,
   cross-repo checks).
 - `scripts/repo-guardrails.sh` also turns issues on (the issue forms) and requires approval for

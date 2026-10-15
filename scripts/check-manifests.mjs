@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { parseAllDocuments } from 'yaml';
 
 const NAMESPACE = 'dx02v2';
-// Kinds the deployer Role of tx02v2 may write (contract v1). Secrets are written by ESO only.
+// Kinds the deployer Role of tx02v2 may write (docs/CONTRATO.md). Secrets are written by ESO only.
 const DEPLOYER_KINDS = new Set([
   'ConfigMap',
   'Deployment',
@@ -24,7 +24,7 @@ const DEPLOYER_KINDS = new Set([
 // dx02v2 started as a copy of the AWS app dx01v2: nothing of that path may come back.
 const OTHER_CLOUD =
   /(^|[^a-z0-9])(aws|eks|ecr|rds|elbv2|wafv2|tx01v2)([^a-z0-9]|$)|amazonaws|alb\.ingress\.kubernetes\.io/i;
-// The only annotation the azure overlays may carry (contract v1); deploy-params is dropped by kustomize.
+// The only annotation the azure overlays may carry (docs/CONTRATO.md); deploy-params is dropped by kustomize.
 const AGC_ID_ANNOTATION = 'alb.networking.azure.io/alb-id';
 
 const failures = [];
@@ -334,7 +334,7 @@ function azureChecks(overlay, { objs }, params, waf) {
     `${overlay}: web image from params`,
   );
 
-  // Gateway API on Application Gateway for Containers, bring-your-own deployment (contract v1).
+  // Gateway API on Application Gateway for Containers, bring-your-own deployment (docs/CONTRATO.md).
   const gateways = all(objs, 'Gateway');
   eq(
     gateways.map((g) => g.metadata?.name),
@@ -376,7 +376,7 @@ function azureChecks(overlay, { objs }, params, waf) {
     ],
     `${overlay}: HTTPRoute rules (/api -> api:3000, / -> web:8080)`,
   );
-  // One HealthCheckPolicy per Service of the HTTPRoute (contract v1: web /healthz, api /readyz).
+  // One HealthCheckPolicy per Service of the HTTPRoute (contract: web /healthz, api /readyz).
   eq(
     all(objs, 'HealthCheckPolicy')
       .map((p) => p.metadata?.name)

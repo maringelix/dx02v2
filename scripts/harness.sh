@@ -39,13 +39,13 @@ CRD_SCHEMA_REF="63669a570e231d4f1f8396d229a1de512bcf0a34" # datreeio/CRDs-catalo
 TEST_POSTGRES_IMAGE="postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
 # Scanner ignores must be reviewed at least every ~7 months.
 TRIVYIGNORE_MAX_DAYS=214
-# Contract v1 (docs/CONTRATO.md): every App Configuration key under tx02v2/lab/ that the deploy reads.
+# The contract (docs/CONTRATO.md): every App Configuration key under tx02v2/lab/ that the deploy reads.
 CONTRACT_APPCONFIG_KEYS=(
   location resource-group cluster-name vnet-cidr agc-subnet-cidr postgres-subnet-cidr acr/login-server
   keyvault/uri db/secret-name app/admin-token-secret-name eso/cluster-secret-store agc/id agc/frontend-name
   waf/policy-id deploy/principal-id
 )
-# Contract v1: SHA-1 thumbprints of the Azure root CAs in the ConfigMap azure-pg-ca.
+# Contract: SHA-1 thumbprints of the Azure root CAs in the ConfigMap azure-pg-ca.
 CONTRACT_PG_CA_THUMBPRINTS=(
   DF3C24F9BFD666761B268073FE06D1CC8D4F82A4 # DigiCert Global Root G2
   73A5E64A3BFF8316FF0EDCCC618A906E4EAE4D74 # Microsoft RSA Root Certificate Authority 2017
@@ -351,7 +351,7 @@ check_policy_identifiers() {
     printf 'GUIDs (subscription, tenant, client, object IDs) must be the placeholder 00000000-0000-0000-0000-000000000000:\n%s\n' "$out"
     rc=1
   }
-  # The globally unique tx02v2 names end in substr(sha1(<subscription_id>), 0, 8) (contract v1).
+  # The globally unique tx02v2 names end in substr(sha1(<subscription_id>), 0, 8) (docs/CONTRATO.md).
   out="$(grep -noP 'tx02v2-?lab-?[0-9a-f]{8}(?![0-9a-z])' "${files[@]}" | grep -vE ':tx02v2-?lab-?00000000$')" || true
   [[ -z "$out" ]] || {
     printf 'ACR, Key Vault and App Configuration names must use the 00000000 suffix placeholder:\n%s\n' "$out"
@@ -642,7 +642,7 @@ check_kubeconform() {
   summary "kubeconform -strict (Kubernetes $K8S_SCHEMA_KUBERNETES_VERSION): $(for o in "${K8S_OVERLAYS[@]}"; do printf '%s: %s; ' "$o" "$(grep -oE '[0-9]+ resources found.*' "$dir/$o.summary")"; done)"
 }
 
-# Contract v1 (docs/CONTRATO.md): manifests and the deploy script use exactly the agreed names.
+# The contract (docs/CONTRATO.md): manifests and the deploy script use exactly the agreed names.
 check_contract_app() {
   local dir="$HARNESS_WORK_DIR/k8s-contract" rc=0 key keys thumb deploy=scripts/deploy-azure.sh
   need kubectl node
@@ -653,24 +653,24 @@ check_contract_app() {
     local-platform="$dir/local-platform.yaml" || rc=1
   # The deploy reads exactly the contract keys (no more, no less) under the contract prefix.
   grep -qxF 'APPCONFIG_PREFIX=tx02v2/lab/' "$deploy" || {
-    echo "$deploy must read the App Configuration prefix tx02v2/lab/ (contract v1)"
+    echo "$deploy must read the App Configuration prefix tx02v2/lab/ (docs/CONTRATO.md)"
     rc=1
   }
   keys="$(awk '/^CONTRACT_KEYS=\(/ { s = 1; next } s && /^\)/ { exit } s { for (i = 1; i <= NF; i++) print $i }' "$deploy" | sort)"
   [[ "$keys" == "$(printf '%s\n' "${CONTRACT_APPCONFIG_KEYS[@]}" | sort)" ]] || {
-    printf '%s must read exactly the contract v1 keys; got:\n%s\n' "$deploy" "$keys"
+    printf '%s must read exactly the contract keys; got:\n%s\n' "$deploy" "$keys"
     rc=1
   }
   for key in "CONTRACT_RESOURCE_GROUP=tx02v2-lab" "CONTRACT_CLUSTER=tx02v2-lab" "CONTRACT_DB_SECRET=tx02v2-lab-db-app" \
     "CONTRACT_ADMIN_TOKEN_SECRET=tx02v2-lab-app-admin-token" "CONTRACT_SECRET_STORE=azure-key-vault"; do
     grep -qxF "$key" "$deploy" || {
-      echo "$deploy must check $key against App Configuration (contract v1)"
+      echo "$deploy must check $key against App Configuration (docs/CONTRATO.md)"
       rc=1
     }
   done
   for thumb in "${CONTRACT_PG_CA_THUMBPRINTS[@]}"; do
     grep -qE "^  '$thumb https://[^ ']+\.crt'$" "$deploy" || {
-      echo "$deploy must download and verify the root CA with SHA-1 thumbprint $thumb (contract v1)"
+      echo "$deploy must download and verify the root CA with SHA-1 thumbprint $thumb (docs/CONTRATO.md)"
       rc=1
     }
   done
@@ -686,7 +686,7 @@ check_contract_app() {
     echo "$deploy: no admin credentials, no tag overwrites"
     rc=1
   fi
-  summary "contract v1: ${#CONTRACT_APPCONFIG_KEYS[@]} App Configuration keys, ${#CONTRACT_PG_CA_THUMBPRINTS[@]} root CA thumbprints, manifests of ${K8S_OVERLAYS[*]}"
+  summary "contract: ${#CONTRACT_APPCONFIG_KEYS[@]} App Configuration keys, ${#CONTRACT_PG_CA_THUMBPRINTS[@]} root CA thumbprints, manifests of ${K8S_OVERLAYS[*]}"
   return "$rc"
 }
 

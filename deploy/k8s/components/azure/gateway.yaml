@@ -1,4 +1,4 @@
-# Contract v1: Application Gateway for Containers (AGC) created by tx02v2 ("bring your own"
+# Contract: Application Gateway for Containers (AGC) created by tx02v2 ("bring your own"
 # deployment), programmed by its ALB Controller through Gateway API. The AGC resource ID
 # (App Configuration tx02v2/lab/agc/id) goes in the alb-id annotation and the frontend name
 # (tx02v2/lab/agc/frontend-name) in spec.addresses, as in the official AGC how-to guides

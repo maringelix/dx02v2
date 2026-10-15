@@ -1,4 +1,4 @@
-# Deploys dx02v2 to the AKS lab cluster of tx02v2 (contract v1, docs/CONTRATO.md). CLOUD-MUTATING
+# Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRATO.md). CLOUD-MUTATING
 # and billable (ACR images, Application Gateway for Containers programmed by the ALB Controller):
 # dispatch manually after the tx02v2 apply and platform workflows; tear down with the tx02v2
 # destroy. The `lab` environment (required reviewer, main only) gates the federated credential of

@@ -47,7 +47,7 @@ patches:
         path: /data/OTEL_EXPORTER_OTLP_ENDPOINT
         value: http://opentelemetry-collector.observability.svc:4318
   # The HPA owns the replica count (2-4); keeping spec.replicas would reset it on every deploy.
-  # ConfigMap azure-pg-ca: the Azure root CAs, created by scripts/deploy-azure.sh (contract v1).
+  # ConfigMap azure-pg-ca: the Azure root CAs, created by scripts/deploy-azure.sh (docs/CONTRATO.md).
   - target:
       kind: Deployment
       name: api

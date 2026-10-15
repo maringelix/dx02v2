@@ -21,7 +21,7 @@ declare -A K8S_LOCAL_PARAM_PATTERN=(
   [DB_ENDPOINT_CIDR]='^(10|172|192)\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/32$'
 )
 
-# Formats accepted for every deploy parameter (values come from App Configuration, contract v1).
+# Formats accepted for every deploy parameter (values come from App Configuration, docs/CONTRATO.md).
 K8S_GUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 K8S_AZURE_NAME='[A-Za-z0-9][A-Za-z0-9_.-]{0,79}'
 # shellcheck disable=SC2034 # read through a nameref in k8s_validate_params

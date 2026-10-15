@@ -1,4 +1,4 @@
-# Contract v1: the Azure WAF policy of tx02v2 (Prevention, DRS 2.1 + Bot Manager 1.1, request body
+# Contract: the Azure WAF policy of tx02v2 (Prevention, DRS 2.1 + Bot Manager 1.1, request body
 # inspection up to 128 KB) protects every listener of the Gateway. Its resource ID comes from
 # App Configuration (tx02v2/lab/waf/policy-id); with the literal `none` (tx02v2 enable_waf = false)
 # scripts/deploy-azure.sh renders overlays/azure, which has no WebApplicationFirewallPolicy. The
