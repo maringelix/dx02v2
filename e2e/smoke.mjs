@@ -185,7 +185,7 @@ await run.check('DELETE needs the admin token: 401 without/wrong, 204 with it', 
 await run.check('oversized bodies and unknown routes get JSON errors', async () => {
   // nginx (64k) or, behind AGC or the Istio Gateway, the API itself (10 kb) answers with the same
   // JSON 413: the WAF policy of tx02v2 inspects bodies up to 128 KB, so 70 KB reaches the API
-  // (contract v1).
+  // (docs/CONTRATO.md).
   const oversized = await post({ author: 'smoke', text: 'x'.repeat(70 * 1024) });
   assertErrorBody(oversized, 413, 'payload_too_large', '70 kb');
   assertErrorBody(await get('/api/does-not-exist'), 404, 'not_found', 'unknown API route');

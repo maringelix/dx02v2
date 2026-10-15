@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys dx02v2 to the AKS lab cluster of tx02v2 (contract v1, docs/CONTRATO.md).
+# Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRATO.md).
 # CLOUD-MUTATING and billable: pushes images to ACR and makes the ALB Controller program Application
 # Gateway for Containers (AGC), which with its WAF is the biggest cost item of the Azure lab. Run it
 # only on purpose, after the tx02v2 apply + platform steps; the teardown is the tx02v2 destroy.
@@ -29,7 +29,7 @@ export PATH="$REPO_ROOT/.tools/bin:$PATH"
 
 NAMESPACE=dx02v2
 APPCONFIG_PREFIX=tx02v2/lab/
-# Contract v1: every App Configuration key the deploy reads (the harness check contract-app verifies this list).
+# Contract: every App Configuration key the deploy reads (the harness check contract-app verifies this list).
 CONTRACT_KEYS=(
   location resource-group cluster-name vnet-cidr agc-subnet-cidr postgres-subnet-cidr acr/login-server
   keyvault/uri db/secret-name app/admin-token-secret-name eso/cluster-secret-store agc/id agc/frontend-name
@@ -45,7 +45,7 @@ APPCONFIG_ENDPOINT_PATTERN='^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$'
 ACR_PATTERN='^tx02v2lab[0-9a-f]{8}\.azurecr\.io$'
 KEYVAULT_PATTERN='^https://tx02v2-lab-[0-9a-f]{8}\.vault\.azure\.net/?$'
 CIDR_PATTERN='^([0-9]{1,3}\.){3}[0-9]{1,3}/([89]|1[0-9]|2[0-9])$'
-# Contract v1: root CAs for Azure Database for PostgreSQL (SHA-1 thumbprint, DER download URL), from
+# Contract: root CAs for Azure Database for PostgreSQL (SHA-1 thumbprint, DER download URL), from
 # learn.microsoft.com/azure/security/fundamentals/azure-ca-details. A download whose thumbprint
 # differs is refused.
 AZURE_PG_ROOTS=(
@@ -53,7 +53,7 @@ AZURE_PG_ROOTS=(
   '73A5E64A3BFF8316FF0EDCCC618A906E4EAE4D74 https://www.microsoft.com/pkiops/certs/Microsoft%20RSA%20Root%20Certificate%20Authority%202017.crt'
   '999A64C37FF47D9FAB95F14769891460EEC4C3C5 https://www.microsoft.com/pkiops/certs/Microsoft%20ECC%20Root%20Certificate%20Authority%202017.crt'
 )
-# Contract v1 does not fix the node architecture: the images target x86_64 nodes (docs/CONTRATO.md).
+# The contract does not fix the node architecture: the images target x86_64 nodes (docs/CONTRATO.md).
 IMAGE_PLATFORM=linux/amd64
 # Every kind of the rendered overlays, as Kubernetes resources (the WAF policy is checked apart).
 DEPLOY_RESOURCES=(
@@ -102,13 +102,13 @@ param() { printf '%s' "${PARAM[$1]}"; }
 # expect_param KEY VALUE -> the fixed names of the contract (never identifiers, safe to print).
 expect_param() {
   [[ "$(param "$1")" == "$2" ]] ||
-    die "App Configuration $APPCONFIG_PREFIX$1 is '$(param "$1")' but the manifests expect '$2' (contract v1)"
+    die "App Configuration $APPCONFIG_PREFIX$1 is '$(param "$1")' but the manifests expect '$2' (docs/CONTRATO.md)"
 }
 
 # expect_format KEY REGEX -> values that carry identifiers are validated without printing them.
 expect_format() {
   [[ "$(param "$1")" =~ $2 ]] ||
-    die "App Configuration $APPCONFIG_PREFIX$1 does not have the format of contract v1 (docs/CONTRATO.md)"
+    die "App Configuration $APPCONFIG_PREFIX$1 does not have the format of the contract (docs/CONTRATO.md)"
 }
 
 write_summary() { # RESULT
@@ -158,7 +158,7 @@ preflight() {
   [[ -n "${AZURE_APPCONFIG_ENDPOINT:-}" ]] ||
     die "AZURE_APPCONFIG_ENDPOINT is required (the App Configuration endpoint output by tx02v2)"
   [[ "$AZURE_APPCONFIG_ENDPOINT" =~ $APPCONFIG_ENDPOINT_PATTERN ]] ||
-    die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (contract v1)"
+    die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (docs/CONTRATO.md)"
   [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]] ||
     die "the working tree has uncommitted changes: the images are built from it and tagged with the commit SHA"
   head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
@@ -189,7 +189,7 @@ read_contract() {
       }
     });' <<<"$out")
   for n in "${CONTRACT_KEYS[@]}"; do
-    [[ -n "${PARAM[$n]:-}" ]] || die "the App Configuration key $APPCONFIG_PREFIX$n is missing (contract v1, docs/CONTRATO.md)"
+    [[ -n "${PARAM[$n]:-}" ]] || die "the App Configuration key $APPCONFIG_PREFIX$n is missing (docs/CONTRATO.md)"
   done
   for n in agc/id waf/policy-id deploy/principal-id; do
     mask "$(param "$n")"
@@ -227,7 +227,7 @@ read_contract() {
   ACR_NAME="${ACR_NAME%%.*}"
   API_IMAGE="$(param acr/login-server)/dx02v2/api:$GIT_SHA"
   WEB_IMAGE="$(param acr/login-server)/dx02v2/web:$GIT_SHA"
-  log "contract v1: ${#CONTRACT_KEYS[@]} keys read and consistent with the manifests (overlay $OVERLAY)"
+  log "contract: ${#CONTRACT_KEYS[@]} keys read and consistent with the manifests (overlay $OVERLAY)"
 }
 
 # connect_cluster -> temporary kubeconfig, then proof that the platform layer of tx02v2 is there and
@@ -238,7 +238,7 @@ connect_cluster() {
   export KUBECONFIG="$WORK_DIR/kubeconfig"
   az aks get-credentials --subscription "$SUBSCRIPTION_ID" --resource-group "$(param resource-group)" \
     --name "$(param cluster-name)" --file "$KUBECONFIG" --only-show-errors >/dev/null ||
-    die "cannot fetch the kubeconfig of $(param cluster-name) (this principal needs the Azure Kubernetes Service Cluster User Role on it, contract v1)"
+    die "cannot fetch the kubeconfig of $(param cluster-name) (this principal needs the Azure Kubernetes Service Cluster User Role on it, docs/CONTRATO.md)"
   # Local accounts are disabled: kubectl authenticates with Entra ID through the Azure CLI session.
   kubelogin convert-kubeconfig -l azurecli --kubeconfig "$KUBECONFIG"
   # Discovery is open to every authenticated user: the API groups of the platform layer must be served.
@@ -271,11 +271,11 @@ connect_cluster() {
 }
 
 # prepare_images -> docker login to ACR and the list of images to build. ACR Basic has no tag
-# immutability, so an existing tag is never pushed again (contract v1): it is reused as is.
+# immutability, so an existing tag is never pushed again (docs/CONTRATO.md): it is reused as is.
 prepare_images() {
   local repositories tags component
   az acr login --name "$ACR_NAME" --only-show-errors >/dev/null ||
-    die "docker login to $ACR_NAME failed (this principal needs AcrPush on the registry, contract v1)"
+    die "docker login to $ACR_NAME failed (this principal needs AcrPush on the registry, docs/CONTRATO.md)"
   ACR_LOGGED_IN=1
   repositories="$(az acr repository list --name "$ACR_NAME" --output tsv --only-show-errors)" ||
     die "cannot list the repositories of $ACR_NAME (AcrPush)"
@@ -325,7 +325,7 @@ create_pg_ca() {
       const want = process.argv[2];
       const got = createHash("sha1").update(der).digest("hex").toUpperCase();
       if (got !== want) {
-        console.error(`SHA-1 thumbprint ${got}, contract v1 expects ${want}`);
+        console.error(`SHA-1 thumbprint ${got}, the contract expects ${want}`);
         process.exit(3);
       }
       const cert = new X509Certificate(der);
@@ -337,7 +337,7 @@ create_pg_ca() {
       console.error(`verified ${cn}: SHA-1 ${got}, SHA-256 ${cert.fingerprint256.replaceAll(":", "")}, valid to ${cert.validTo}`);
       const pem = cert.toString();
       process.stdout.write(pem.endsWith("\n") ? pem : `${pem}\n`);
-    ' "$der" "$want" >>"$bundle" || die "refusing $url (contract v1 root CA)"
+    ' "$der" "$want" >>"$bundle" || die "refusing $url (root CA of the contract)"
   done
   (($(grep -c -- '-----BEGIN CERTIFICATE-----' "$bundle") == ${#AZURE_PG_ROOTS[@]})) ||
     die "the azure-pg-ca bundle does not hold the ${#AZURE_PG_ROOTS[@]} contract roots"
@@ -414,7 +414,7 @@ main() {
   preflight
   WORK_DIR="$(mktemp -d)"
   trap cleanup EXIT
-  section "contract v1: App Configuration ${APPCONFIG_PREFIX}*"
+  section "contract: App Configuration ${APPCONFIG_PREFIX}*"
   read_contract
   section "cluster $(param cluster-name): kubeconfig, platform API groups, RBAC"
   connect_cluster
