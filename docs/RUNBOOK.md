@@ -137,7 +137,9 @@ as variáveis, instala kubectl e kubelogin fixados, faz o login OIDC (`azure/log
 7. espera os ExternalSecrets `db-credentials` e `app-secrets`, os rollouts, o Gateway `Programmed` com
    o endereço do frontend e, com o WAF, a WebApplicationFirewallPolicy `Accepted`;
 8. roda `e2e/smoke.mjs` pelo Application Gateway for Containers com `SMOKE_EDGE=agc` (até 15 minutos de
-   espera pelo DNS e pelos health probes) e escreve o resumo do job.
+   espera pelo DNS e pelos health probes) e escreve o resumo do job. O frontend do AGC só fala HTTP
+   (HTTPS nas nuvens está fora do escopo da v2): o token de admin não é lido nem enviado, e o smoke
+   test pula a chamada `DELETE` com o token (`SKIP` no resumo); as chamadas com token errado rodam.
 
 A partir de um laptop (working tree limpo e no commit que você quer publicar, porque a tag é o SHA):
 

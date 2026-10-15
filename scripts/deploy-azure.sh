@@ -397,14 +397,15 @@ wait_for_gateway() {
 }
 
 smoke() {
-  local token status=0
+  local status=0
   BASE="http://$GATEWAY_ADDRESS"
-  token="$(kubectl -n "$NAMESPACE" get secret app-secrets -o jsonpath='{.data.ADMIN_TOKEN}' | base64 -d)"
-  [[ ${#token} -ge 32 ]] || die "the Secret app-secrets has no usable ADMIN_TOKEN (is the ExternalSecret synced?)"
-  mask "$token"
+  # The admin token is a credential: the frontend of the AGC answers plain HTTP only (HTTPS in the
+  # clouds is outside the scope of v2), so the token is neither read nor sent, and the smoke test skips
+  # the one call that needs it (SKIP in the summary). The checks that send a made-up token still run.
+  log "the entry point is plain HTTP: the admin token is not read, and the smoke test skips the DELETE that needs it"
   # SMOKE_EDGE=agc: AGC routes /api straight to the API and assigns its own X-Request-Id; the WAF
   # policy inspects bodies up to 128 KB, so the API itself answers 413 for the 70 KB body.
-  BASE_URL="$BASE" ADMIN_TOKEN="$token" SMOKE_EDGE=agc SMOKE_WAIT_SECONDS="${SMOKE_WAIT_SECONDS:-900}" \
+  BASE_URL="$BASE" ADMIN_TOKEN="" SMOKE_EDGE=agc SMOKE_WAIT_SECONDS="${SMOKE_WAIT_SECONDS:-900}" \
     node "$REPO_ROOT/e2e/smoke.mjs" | tee "$WORK_DIR/smoke.txt" || status=$?
   ((status == 0)) || die "the smoke test through Application Gateway for Containers failed (FAIL lines above)"
 }

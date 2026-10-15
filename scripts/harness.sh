@@ -538,6 +538,8 @@ check_policy_app() {
   forbid 'console\.(log|error|warn|info)' "the API logs through pino only" '*.ts' api/src || rc=1
   forbid 'localStorage|sessionStorage|document\.cookie' "the admin token stays in memory only" '*.ts*' web/src || rc=1
   forbid 'Strict-Transport-Security "max-age' "HSTS only through the map (HTTPS requests)" '*.conf' web/nginx || rc=1
+  # A destination that is empty must stop the script, not delete what the path then resolves to.
+  forbid 'rm -rf "\$[A-Za-z_]+"' "rm -rf of a bare variable in scripts/lib/k8s.sh: use the :? parameter expansion so an empty value stops the script" 'k8s.sh' scripts/lib || rc=1
   local loc includes
   loc="$(grep -cE '^[[:space:]]*location ' web/nginx/default.conf)"
   includes="$(grep -cE '^[[:space:]]*include /etc/nginx/snippets/security-headers\.conf;' web/nginx/default.conf)"
