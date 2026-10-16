@@ -77,9 +77,9 @@ Only after tx02v2 is applied in your subscription
 the repository variables of this fork (`github_variables_dx02v2`: `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `AZURE_APPCONFIG_ENDPOINT`, whose store exists only
 after the apply); then run `deploy-azure` from the Actions tab and approve the `lab` environment. The
-workflow builds and pushes the images, applies the manifests and runs the smoke test through
-Application Gateway for Containers: [docs/RUNBOOK.md](docs/RUNBOOK.md), sections 5 to 9. Destroy the
-lab from tx02v2 on the same day.
+workflow builds and pushes the images, publishes the GitOps revision, waits for Argo CD and runs the
+smoke test through Application Gateway for Containers: [docs/RUNBOOK.md](docs/RUNBOOK.md), sections
+5 to 9. Destroy the lab from tx02v2 on the same day.
 
 Your fork is public, and so are its workflow logs. The deploy masks the identifiers it handles; never
 paste credentials or subscription, tenant or client IDs into an issue or a pull request.

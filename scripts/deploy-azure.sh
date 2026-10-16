@@ -10,12 +10,16 @@
 #   AZURE_APPCONFIG_ENDPOINT  required: endpoint of the contract store (an output of tx02v2)
 #   GIT_SHA                   commit to deploy (default: HEAD); must be the checked-out commit, and
 #                             the working tree must be clean (the images are tagged with it)
+#   DEPLOY_MODE               gitops (default: publish to gitops/azure and wait for Argo CD) or push
+#   GITHUB_TOKEN              optional locally; Actions uses it for the GitOps branch push
+#   ARGO_SYNC_TIMEOUT         seconds to wait for the Argo CD Application (default 600)
 #   SMOKE_WAIT_SECONDS        how long the smoke test waits for the AGC frontend (default 900)
 # Steps: App Configuration contract -> AKS kubeconfig (az aks get-credentials + kubelogin) -> API
 # groups and RBAC preflight -> ACR login and tag check -> images (linux/amd64 build + push; an
 # existing tag is never overwritten) -> ConfigMap azure-pg-ca (three root CAs, SHA-1 thumbprints
-# checked) -> render + kubectl apply -k -> ExternalSecrets -> rollouts -> Gateway address (and WAF
-# policy) -> smoke test through AGC -> job summary (GitHub Actions).
+# checked) -> configure Argo CD and publish gitops/azure (default) -> sync -> ExternalSecrets
+# -> rollouts -> Gateway address (and WAF policy) -> smoke test through AGC.
+# DEPLOY_MODE=push applies the overlay directly.
 # Every Azure token is acquired in the first minutes, before the image builds: the GitHub OIDC
 # assertion behind azure/login expires after 5-10 minutes, and from then on the Azure CLI can only
 # reuse the access tokens it already holds (about one hour).
@@ -76,6 +80,9 @@ WEB_IMAGE=""
 WAF_SERVED=0
 GATEWAY_ADDRESS=""
 BASE=""
+DEPLOY_MODE="${DEPLOY_MODE:-gitops}"
+ARGO_SYNC_TIMEOUT="${ARGO_SYNC_TIMEOUT:-600}"
+GITOPS_REV=""
 
 in_actions() { [[ "${GITHUB_ACTIONS:-}" == true ]]; }
 
@@ -159,6 +166,13 @@ preflight() {
     die "AZURE_APPCONFIG_ENDPOINT is required (the App Configuration endpoint output by tx02v2)"
   [[ "$AZURE_APPCONFIG_ENDPOINT" =~ $APPCONFIG_ENDPOINT_PATTERN ]] ||
     die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (docs/CONTRATO.md)"
+  [[ "$DEPLOY_MODE" == gitops || "$DEPLOY_MODE" == push ]] || die "DEPLOY_MODE must be gitops or push"
+  if [[ ! "$ARGO_SYNC_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    die "ARGO_SYNC_TIMEOUT must be an integer of at least 5 seconds"
+  fi
+  if ((ARGO_SYNC_TIMEOUT < 5)); then
+    die "ARGO_SYNC_TIMEOUT must be an integer of at least 5 seconds"
+  fi
   [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]] ||
     die "the working tree has uncommitted changes: the images are built from it and tagged with the commit SHA"
   head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
@@ -267,6 +281,12 @@ connect_cluster() {
   [[ "$(kubectl auth can-i get secrets -n "$NAMESPACE" 2>/dev/null)" == yes ]] || missing+=("get secrets")
   ((${#missing[@]} == 0)) ||
     die "this principal cannot deploy to namespace $NAMESPACE (${missing[*]}): it needs the RoleBinding dx02v2-deployers of the tx02v2 platform layer (Role dx02v2-deployer; subject: the object ID of dx02v2-gha-deploy, or yours in app_deployer_principal_ids)"
+  if [[ "$DEPLOY_MODE" == gitops ]]; then
+    [[ "$(kubectl auth can-i patch applications.argoproj.io/dx02v2 -n argocd 2>/dev/null)" == yes ]] ||
+      die "this principal cannot patch the Argo CD Application dx02v2 in argocd (tx02v2 full platform Role)"
+    kubectl -n argocd get application dx02v2 >/dev/null ||
+      die "Argo CD Application dx02v2 is missing (install the tx02v2 full platform first)"
+  fi
   log "cluster $(param cluster-name): platform API groups served, Role dx02v2-deployer usable in $NAMESPACE"
 }
 
@@ -345,8 +365,8 @@ create_pg_ca() {
     kubectl apply -f -
 }
 
-render_and_apply() {
-  local params="$WORK_DIR/params.env" tree="$WORK_DIR/k8s"
+write_params() {
+  local params="$WORK_DIR/params.env"
   {
     echo "API_IMAGE=$API_IMAGE"
     echo "WEB_IMAGE=$WEB_IMAGE"
@@ -356,8 +376,31 @@ render_and_apply() {
     echo "AGC_SUBNET_CIDR=$(param agc-subnet-cidr)"
     echo "POSTGRES_SUBNET_CIDR=$(param postgres-subnet-cidr)"
   } >"$params"
+}
+
+write_revision() {
+  local file="$1"
+  cat >"$file" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitops-revision
+  labels:
+    app.kubernetes.io/name: dx02v2
+    app.kubernetes.io/part-of: dx02v2
+data:
+  source-commit: "$GIT_SHA"
+  api-image-tag: "$GIT_SHA"
+  web-image-tag: "$GIT_SHA"
+EOF
+}
+
+render_and_apply() {
+  local tree="$WORK_DIR/k8s"
+  write_params
   # Validates every value against the contract formats and renders a temporary copy of deploy/k8s.
-  k8s_prepare_tree "$tree" "$params"
+  k8s_prepare_tree "$tree" "$WORK_DIR/params.env"
+  write_revision "$tree/overlays/$OVERLAY/gitops-revision.yaml"
   kubectl kustomize "$tree/overlays/$OVERLAY" >"$WORK_DIR/rendered.yaml"
   log "overlays/$OVERLAY rendered: $(grep -c '^kind: ' "$WORK_DIR/rendered.yaml") objects"
   kubectl apply -k "$tree/overlays/$OVERLAY"
@@ -367,12 +410,59 @@ render_and_apply() {
   fi
 }
 
+render_gitops_source() {
+  local tree="$WORK_DIR/k8s"
+  write_params
+  k8s_prepare_tree "$tree" "$WORK_DIR/params.env"
+  write_revision "$tree/overlays/$OVERLAY/gitops-revision.yaml"
+  kubectl kustomize "$tree/overlays/$OVERLAY" >"$WORK_DIR/rendered.yaml"
+  log "GitOps source overlays/$OVERLAY rendered: $(grep -c '^kind: ' "$WORK_DIR/rendered.yaml") objects"
+}
+
+configure_gitops_application() {
+  local patch="$WORK_DIR/argocd-application-patch.json"
+  node "$REPO_ROOT/scripts/render-gitops-application.mjs" azure "$OVERLAY" \
+    "$WORK_DIR/params.env" "$REPO_ROOT/deploy/k8s/components/azure/params.example.env" >"$patch"
+  kubectl -n argocd patch application dx02v2 --type merge --patch-file "$patch" >/dev/null
+  log "Argo CD Application source configured for $OVERLAY and image tag $GIT_SHA"
+}
+
+publish_gitops_revision() {
+  GITOPS_REV="$(bash "$REPO_ROOT/scripts/publish-gitops.sh" azure "$OVERLAY" "$GIT_SHA")"
+  [[ "$GITOPS_REV" =~ ^[0-9a-f]{40}$ ]] || die "GitOps branch push returned no commit SHA"
+  kubectl -n argocd annotate application dx02v2 argocd.argoproj.io/refresh=normal --overwrite >/dev/null
+  log "published origin/gitops/azure at ${GITOPS_REV:0:7}"
+}
+
+wait_for_gitops() {
+  local i sync health revision=""
+  for i in $(seq 1 $((ARGO_SYNC_TIMEOUT / 5))); do
+    sync="$(kubectl -n argocd get application dx02v2 -o jsonpath='{.status.sync.status}' 2>/dev/null)" || sync=""
+    health="$(kubectl -n argocd get application dx02v2 -o jsonpath='{.status.health.status}' 2>/dev/null)" || health=""
+    revision="$(kubectl -n argocd get application dx02v2 -o jsonpath='{.status.sync.revision}' 2>/dev/null)" || revision=""
+    [[ "$sync" == Synced && "$health" == Healthy && "$revision" == "$GITOPS_REV" ]] && {
+      log "Argo CD: dx02v2 Synced and Healthy at ${revision:0:7}"
+      return 0
+    }
+    ((i % 12 == 0)) && log "Argo CD: dx02v2 sync=${sync:-?} health=${health:-?} revision=${revision:0:7}"
+    sleep 5
+  done
+  kubectl -n argocd get application dx02v2 -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"\n"}{end}' >&2 || :
+  die "Argo CD did not reach Synced/Healthy at ${GITOPS_REV:0:7} within ${ARGO_SYNC_TIMEOUT}s"
+}
+
 wait_for_rollout() {
+  local api_image api_init_image web_image
   if ! kubectl -n "$NAMESPACE" wait externalsecret/db-credentials externalsecret/app-secrets \
     --for=condition=Ready --timeout=300s; then
     kubectl -n "$NAMESPACE" describe externalsecret db-credentials app-secrets >&2 || :
     die "the ExternalSecrets did not become Ready (ClusterSecretStore $CONTRACT_SECRET_STORE and the Key Vault secrets of tx02v2)"
   fi
+  api_image="$(kubectl -n "$NAMESPACE" get deployment api -o jsonpath='{.spec.template.spec.containers[?(@.name=="api")].image}')"
+  api_init_image="$(kubectl -n "$NAMESPACE" get deployment api -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="migrate")].image}')"
+  web_image="$(kubectl -n "$NAMESPACE" get deployment web -o jsonpath='{.spec.template.spec.containers[?(@.name=="web")].image}')"
+  [[ "$api_image" == "$API_IMAGE" && "$api_init_image" == "$API_IMAGE" && "$web_image" == "$WEB_IMAGE" ]] ||
+    die "Argo CD did not apply the requested immutable images (api=$api_image migrate=$api_init_image web=$web_image)"
   kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=600s
   kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=600s
 }
@@ -425,8 +515,16 @@ main() {
   publish_images
   section "ConfigMap azure-pg-ca (Azure root CAs, thumbprints checked)"
   create_pg_ca
-  section "kubectl apply -k deploy/k8s/overlays/$OVERLAY"
-  render_and_apply
+  if [[ "$DEPLOY_MODE" == gitops ]]; then
+    section "publish and sync GitOps revision gitops/azure"
+    render_gitops_source
+    configure_gitops_application
+    publish_gitops_revision
+    wait_for_gitops
+  else
+    section "kubectl apply -k deploy/k8s/overlays/$OVERLAY (direct push alternative)"
+    render_and_apply
+  fi
   section "ExternalSecrets and rollouts"
   wait_for_rollout
   section "Gateway (Application Gateway for Containers)"

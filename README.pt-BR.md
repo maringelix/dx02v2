@@ -47,7 +47,7 @@ A família do lab (v2):
 | Imagens: build, usuário numérico não root, sem npm nem shell no runtime da API, gate do trivy HIGH/CRITICAL | `verificado no CI` | `make build`; job `images` do CI |
 | Stack do compose (PostgreSQL → migrate → api → web em 127.0.0.1) + smoke test | `verificado localmente` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, fora do CI) |
 | Ponta a ponta no kind: Pod Security `restricted`, smoke test pelo nginx, enforcement de NetworkPolicy | `verificado no CI` | `make e2e` (`scripts/e2e-kind.sh`); job `e2e` do CI |
-| Deploy na Azure (push no ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, traces para o OpenTelemetry Collector do tx02v2 e o Application Insights, smoke test por ele) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
+| Deploy na Azure (ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, traces para o OpenTelemetry Collector e o Application Insights, smoke test; workflow com GitOps do Argo CD, push direto pelo script como alternativa) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
 | HTTPS no listener do Application Gateway for Containers | `planejado` | precisa de um Secret TLS; fora do contrato v2 (`docs/CONTRATO.md`) |
 | Configurações do repositório como código (ruleset, environment `lab`) | `verificado localmente` | `scripts/repo-guardrails.sh` aplicado; conferido com `gh api` em 2026-10-14 (`docs/PUBLICACAO.md`) |
 | Overlay `local-platform` para o lab local do tx02v2: render do kustomize + kubeconform estrito, asserções contra o contrato local e os kinds do AppProject `dx02v2`, cinco regras de alerta testadas com promtool | `verificado no CI` | `make static` (`kubeconform`, `contract-app`, `promtool-rules`) num contêiner Linux; job `static` do CI |
@@ -79,7 +79,9 @@ flowchart LR
 - Azure: o Application Gateway for Containers (com a política de WAF do tx02v2) manda `/api` para a
   API e `/` para o web pela Gateway API; ele acrescenta o endereço do cliente ao `X-Forwarded-For`,
   então continua havendo exatamente um salto confiável. Os segredos vêm do Key Vault pelo External
-  Secrets; namespace, identidades, AGC, PostgreSQL e camada de plataforma são do tx02v2.
+  Secrets; namespace, identidades, AGC, PostgreSQL e camada de plataforma são do tx02v2. O workflow
+  publica a revisão na branch `gitops/azure` para o Argo CD; o script também aceita push direto para
+  clusters sem Argo CD, enquanto o workflow do Actions usa sempre GitOps.
 - Decisões de design, diagramas por ambiente e as tabelas dx01v2 ↔ dx02v2 e v1 → v2:
   [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
@@ -119,8 +121,8 @@ confira o [documento de custos do tx02v2](https://github.com/maringelix/tx02v2/b
 e a calculadora oficial. Use uma assinatura dedicada com orçamento e destrua no mesmo dia.
 
 Siga o [docs/RUNBOOK.md](docs/RUNBOOK.md): bootstrap/apply/plataforma do tx02v2 → variáveis do
-GitHub do dx02v2 → workflow `deploy-azure` (ou `scripts/deploy-azure.sh`) → smoke test pelo
-Application Gateway for Containers → destroy do tx02v2 + checagem de sobras → issue
+GitHub do dx02v2 → workflow `deploy-azure` (GitOps com Argo CD) → smoke
+test pelo Application Gateway for Containers → destroy do tx02v2 + checagem de sobras → issue
 `cloud_run_report`.
 
 ## Harness
