@@ -53,8 +53,12 @@ const api = image(required(actual, 'API_IMAGE'), 'API_IMAGE');
 const web = image(required(actual, 'WEB_IMAGE'), 'WEB_IMAGE');
 const apiExample = image(required(example, 'API_IMAGE'), 'example API_IMAGE');
 const webExample = image(required(example, 'WEB_IMAGE'), 'example WEB_IMAGE');
-if (!api.name.endsWith('/dx02v2/api') || !apiExample.name.endsWith('/dx02v2/api') ||
-    !web.name.endsWith('/dx02v2/web') || !webExample.name.endsWith('/dx02v2/web')) {
+if (
+  !api.name.endsWith('/dx02v2/api') ||
+  !apiExample.name.endsWith('/dx02v2/api') ||
+  !web.name.endsWith('/dx02v2/web') ||
+  !webExample.name.endsWith('/dx02v2/web')
+) {
   fail('runtime and example images must use the dx02v2/api and dx02v2/web repositories');
 }
 const patches = [];
