@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
 # Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRATO.md).
-# CLOUD-MUTATING and billable: pushes images to ACR and makes the ALB Controller program Application
+# CLOUD-MUTATING and billable: promotes a signed GHCR release to ACR and makes the ALB Controller program Application
 # Gateway for Containers (AGC), which with its WAF is the biggest cost item of the Azure lab. Run it
 # only on purpose, after the tx02v2 apply + platform steps; the teardown is the tx02v2 destroy.
 # Not run in the cloud yet (v2).
 # Used by .github/workflows/deploy-azure.yml and from a laptop (docs/RUNBOOK.md):
-#   az login && AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<suffix>.azconfig.io scripts/deploy-azure.sh
+#   see docs/RUNBOOK.md for release bundle, GHCR login, Git credentials and Azure login requirements
 # Environment:
 #   AZURE_APPCONFIG_ENDPOINT  required: endpoint of the contract store (an output of tx02v2)
-#   GIT_SHA                   commit to deploy (default: HEAD); must be the checked-out commit, and
-#                             the working tree must be clean (the images are tagged with it)
+#   RELEASE_DIR               verified release bundle (manifest and two SPDX files)
+#   RELEASE_RUN_ID            successful publish-images Actions run id for that bundle
+#   GH_TOKEN                  token with actions:read, attestations:read and packages:read
+#   GIT_SHA                   optional; if set, must equal the release manifest source commit
 #   DEPLOY_MODE               gitops (default: publish to gitops/azure and wait for Argo CD) or push
 #   GITHUB_TOKEN              optional locally; Actions uses it for the GitOps branch push
+#   GITHUB_REPOSITORY, GITHUB_ACTOR  repository and GHCR username used to verify/import the release
 #   ARGO_SYNC_TIMEOUT         seconds to wait for the Argo CD Application (default 600)
 #   SMOKE_WAIT_SECONDS        how long the smoke test waits for the AGC frontend (default 900)
-# Steps: App Configuration contract -> AKS kubeconfig (az aks get-credentials + kubelogin) -> API
-# groups and RBAC preflight -> ACR login and tag check -> images (linux/amd64 build + push; an
-# existing tag is never overwritten) -> ConfigMap azure-pg-ca (three root CAs, SHA-1 thumbprints
+# Steps: verify signed release -> App Configuration contract -> AKS kubeconfig (az aks get-credentials + kubelogin) -> API
+# groups and RBAC preflight -> import verified GHCR digests into ACR without rebuilding -> ConfigMap azure-pg-ca (three root CAs, SHA-1 thumbprints
 # checked) -> configure Argo CD and publish gitops/azure (default) -> sync -> ExternalSecrets
 # -> rollouts -> Gateway address (and WAF policy) -> smoke test through AGC.
 # DEPLOY_MODE=push applies the overlay directly.
-# Every Azure token is acquired in the first minutes, before the image builds: the GitHub OIDC
+# Every Azure token is acquired in the first minutes: the GitHub OIDC
 # assertion behind azure/login expires after 5-10 minutes, and from then on the Azure CLI can only
 # reuse the access tokens it already holds (about one hour).
 set -euo pipefail
@@ -57,8 +59,6 @@ AZURE_PG_ROOTS=(
   '73A5E64A3BFF8316FF0EDCCC618A906E4EAE4D74 https://www.microsoft.com/pkiops/certs/Microsoft%20RSA%20Root%20Certificate%20Authority%202017.crt'
   '999A64C37FF47D9FAB95F14769891460EEC4C3C5 https://www.microsoft.com/pkiops/certs/Microsoft%20ECC%20Root%20Certificate%20Authority%202017.crt'
 )
-# The contract does not fix the node architecture: the images target x86_64 nodes (docs/CONTRATO.md).
-IMAGE_PLATFORM=linux/amd64
 # Every kind of the rendered overlays, as Kubernetes resources (the WAF policy is checked apart).
 DEPLOY_RESOURCES=(
   deployments.apps services configmaps serviceaccounts poddisruptionbudgets.policy
@@ -68,7 +68,6 @@ DEPLOY_RESOURCES=(
 WAF_RESOURCE=webapplicationfirewallpolicy.alb.networking.azure.io
 
 declare -A PARAM=()
-declare -a TO_BUILD=()
 WORK_DIR=""
 GROUP_OPEN=0
 OVERLAY=azure
@@ -77,6 +76,13 @@ ACR_NAME=""
 ACR_LOGGED_IN=0
 API_IMAGE=""
 WEB_IMAGE=""
+RELEASE_MANIFEST=""
+API_SOURCE_NAME=""
+API_SOURCE_DIGEST=""
+API_IMAGE_ID=""
+WEB_SOURCE_NAME=""
+WEB_SOURCE_DIGEST=""
+WEB_IMAGE_ID=""
 WAF_SERVED=0
 GATEWAY_ADDRESS=""
 BASE=""
@@ -119,6 +125,9 @@ expect_format() {
 }
 
 write_summary() { # RESULT
+  local api_digest="${API_IMAGE##*@}" web_digest="${WEB_IMAGE##*@}"
+  [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || api_digest=not-promoted
+  [[ "$web_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || web_digest=not-promoted
   [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
   {
     echo "## dx02v2 deploy: $1"
@@ -127,14 +136,9 @@ write_summary() { # RESULT
     echo "|---|---|"
     echo "| Commit | \`${GIT_SHA:-unknown}\` |"
     echo "| Overlay | \`deploy/k8s/overlays/$OVERLAY\` |"
-    echo "| Images | \`dx02v2/api:${GIT_SHA:-}\`, \`dx02v2/web:${GIT_SHA:-}\` in ACR |"
-    echo "| Entry point | ${BASE:-not reached} |"
-    if [[ -f "$WORK_DIR/smoke.txt" ]]; then
-      echo
-      echo '```'
-      cat "$WORK_DIR/smoke.txt"
-      echo '```'
-    fi
+    printf "| Images | API \`%s\`, web \`%s\` in ACR |\n" "$api_digest" "$web_digest"
+    echo "| Entry point | $([[ -n "$GATEWAY_ADDRESS" ]] && echo 'AGC ready' || echo 'not reached') |"
+    echo "| Smoke test | $([[ -f "$WORK_DIR/smoke.txt" ]] && echo 'completed' || echo 'not completed') |"
     echo
     echo "Application Gateway for Containers (and its WAF), AKS and PostgreSQL bill by the hour: tear the lab down with the destroy workflow of tx02v2."
   } >>"$GITHUB_STEP_SUMMARY"
@@ -160,8 +164,27 @@ cleanup() {
 }
 
 preflight() {
-  local head
-  require_cmd az kubectl kubelogin docker node git curl base64
+  local release_sha
+  require_cmd az kubectl kubelogin docker node git curl base64 gh jq
+  for name in GITHUB_REPOSITORY GITHUB_ACTOR; do
+    [[ -n "${!name:-}" ]] || die "$name is required to verify and promote the signed release"
+  done
+  [[ -n "${RELEASE_DIR:-}" ]] || die "RELEASE_DIR is required; publish and verify a release first"
+  [[ -n "${RELEASE_RUN_ID:-}" ]] || die "RELEASE_RUN_ID is required; select the successful publish-images run"
+  [[ -n "${GH_TOKEN:-}" ]] || die "GH_TOKEN with actions:read, attestations:read and packages:read is required"
+  RELEASE_MANIFEST="$RELEASE_DIR/release-manifest.json"
+  bash "$REPO_ROOT/scripts/verify-release-bundle.sh"
+  API_SOURCE_NAME="$(jq -er '.images.api.name' "$RELEASE_MANIFEST")"
+  API_SOURCE_DIGEST="$(jq -er '.images.api.digest' "$RELEASE_MANIFEST")"
+  API_IMAGE_ID="$(jq -er '.images.api.image_id' "$RELEASE_MANIFEST")"
+  WEB_SOURCE_NAME="$(jq -er '.images.web.name' "$RELEASE_MANIFEST")"
+  WEB_SOURCE_DIGEST="$(jq -er '.images.web.digest' "$RELEASE_MANIFEST")"
+  WEB_IMAGE_ID="$(jq -er '.images.web.image_id' "$RELEASE_MANIFEST")"
+  release_sha="$(jq -er '.source.sha' "$RELEASE_MANIFEST")"
+  if [[ -n "${GIT_SHA:-}" && "$GIT_SHA" != "$release_sha" ]]; then
+    die "GIT_SHA does not match the verified release source commit $release_sha"
+  fi
+  GIT_SHA="$release_sha"
   [[ -n "${AZURE_APPCONFIG_ENDPOINT:-}" ]] ||
     die "AZURE_APPCONFIG_ENDPOINT is required (the App Configuration endpoint output by tx02v2)"
   [[ "$AZURE_APPCONFIG_ENDPOINT" =~ $APPCONFIG_ENDPOINT_PATTERN ]] ||
@@ -173,12 +196,6 @@ preflight() {
   if ((ARGO_SYNC_TIMEOUT < 5)); then
     die "ARGO_SYNC_TIMEOUT must be an integer of at least 5 seconds"
   fi
-  [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]] ||
-    die "the working tree has uncommitted changes: the images are built from it and tagged with the commit SHA"
-  head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-  GIT_SHA="${GIT_SHA:-$head}"
-  [[ "$GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || die "GIT_SHA must be a full 40-character commit SHA"
-  [[ "$GIT_SHA" == "$head" ]] || die "GIT_SHA must be the checked-out commit (the images are built from the working tree)"
   az account show --query id --output tsv >/dev/null ||
     die "no usable Azure CLI login (azure/login with dx02v2-gha-deploy in GitHub Actions, or az login)"
 }
@@ -239,8 +256,8 @@ read_contract() {
     die "the Azure CLI is logged in to another subscription than the one of agc/id (az account set --subscription <lab subscription>)"
   ACR_NAME="$(param acr/login-server)"
   ACR_NAME="${ACR_NAME%%.*}"
-  API_IMAGE="$(param acr/login-server)/dx02v2/api:$GIT_SHA"
-  WEB_IMAGE="$(param acr/login-server)/dx02v2/web:$GIT_SHA"
+  API_IMAGE="$(param acr/login-server)/dx02v2/api@$API_SOURCE_DIGEST"
+  WEB_IMAGE="$(param acr/login-server)/dx02v2/web@$WEB_SOURCE_DIGEST"
   log "contract: ${#CONTRACT_KEYS[@]} keys read and consistent with the manifests (overlay $OVERLAY)"
 }
 
@@ -290,41 +307,53 @@ connect_cluster() {
   log "cluster $(param cluster-name): platform API groups served, Role dx02v2-deployer usable in $NAMESPACE"
 }
 
-# prepare_images -> docker login to ACR and the list of images to build. ACR Basic has no tag
-# immutability, so an existing tag is never pushed again (docs/CONTRATO.md): it is reused as is.
-prepare_images() {
-  local repositories tags component
-  az acr login --name "$ACR_NAME" --only-show-errors >/dev/null ||
-    die "docker login to $ACR_NAME failed (this principal needs AcrPush on the registry, docs/CONTRATO.md)"
-  ACR_LOGGED_IN=1
+# promote_image COMPONENT GHCR_NAME DIGEST EXPECTED_IMAGE_ID -> immutable ACR image reference.
+# ACR Basic does not enforce immutable tags, so an existing commit tag must match the signed digest.
+promote_image() {
+  local component="$1" source_name="$2" source_digest="$3" expected_id="$4"
+  local source_ref="$source_name@$source_digest" image_tag="dx02v2/$component:$GIT_SHA"
+  local repositories="" tags="" target_digest="" target_ref target_id source_id
+  docker pull "$source_ref" >/dev/null || die "cannot pull verified $component source digest $source_ref"
+  source_id="$(docker image inspect "$source_ref" --format '{{.Id}}')"
+  [[ "$source_id" == "$expected_id" ]] ||
+    die "$component GHCR digest does not contain the image ID from the release manifest"
   repositories="$(az acr repository list --name "$ACR_NAME" --output tsv --only-show-errors)" ||
-    die "cannot list the repositories of $ACR_NAME (AcrPush)"
-  for component in api web; do
-    tags=""
-    if grep -qxF "dx02v2/$component" <<<"$repositories"; then
-      tags="$(az acr repository show-tags --name "$ACR_NAME" --repository "dx02v2/$component" --output tsv --only-show-errors)" ||
-        die "cannot list the tags of dx02v2/$component in $ACR_NAME"
-    fi
-    if grep -qxF "$GIT_SHA" <<<"$tags"; then
-      log "dx02v2/$component:$GIT_SHA is already in $ACR_NAME: reused, never overwritten"
-    else
-      TO_BUILD+=("$component")
-    fi
-  done
+    die "cannot list the repositories of $ACR_NAME (the deploy identity needs Container Registry Data Importer and Data Reader; see the R8 tx02v2 contract update)"
+  if grep -qxF "dx02v2/$component" <<<"$repositories"; then
+    tags="$(az acr repository show-tags --name "$ACR_NAME" --repository "dx02v2/$component" --output tsv --only-show-errors)" ||
+      die "cannot list the tags of dx02v2/$component in $ACR_NAME"
+  fi
+  if grep -qxF "$GIT_SHA" <<<"$tags"; then
+    target_digest="$(az acr repository show --name "$ACR_NAME" --image "$image_tag" --query digest --output tsv --only-show-errors)" ||
+      die "cannot resolve the existing ACR digest for $image_tag"
+    [[ "$target_digest" == "$source_digest" ]] ||
+      die "ACR tag $image_tag already points to a digest other than the verified release; refusing to overwrite it"
+    log "$image_tag already exists with the verified digest; reusing it" >&2
+  else
+    az acr import --name "$ACR_NAME" --source "$source_ref" --image "$image_tag" \
+      --username "$GITHUB_ACTOR" --password "$GH_TOKEN" --only-show-errors --output none ||
+      die "cannot import the verified $component digest into ACR without rebuilding"
+    target_digest="$(az acr repository show --name "$ACR_NAME" --image "$image_tag" --query digest --output tsv --only-show-errors)" ||
+      die "cannot resolve the imported ACR digest for $image_tag"
+    [[ "$target_digest" == "$source_digest" ]] ||
+      die "ACR import changed the approved $component manifest digest (source $source_digest, ACR $target_digest)"
+  fi
+  target_ref="$(param acr/login-server)/dx02v2/$component@$target_digest"
+  docker pull "$target_ref" >/dev/null || die "cannot pull the promoted $component digest from ACR"
+  target_id="$(docker image inspect "$target_ref" --format '{{.Id}}')"
+  [[ "$target_id" == "$expected_id" ]] || die "promoted $component ACR digest differs from the signed GHCR image"
+  printf '%s' "$target_ref"
 }
 
 publish_images() {
-  local component image
-  for component in "${TO_BUILD[@]}"; do
-    image="$API_IMAGE"
-    if [[ "$component" == web ]]; then
-      image="$WEB_IMAGE"
-    fi
-    docker build --platform "$IMAGE_PLATFORM" -f "$REPO_ROOT/$component/Dockerfile" --build-arg GIT_SHA="$GIT_SHA" \
-      -t "$image" "$REPO_ROOT"
-    docker push "$image"
-  done
-  log "images: built and pushed ${TO_BUILD[*]:-nothing}; deploying dx02v2/api and dx02v2/web at $GIT_SHA"
+  local acr_login_server
+  acr_login_server="$(param acr/login-server)"
+  az acr login --name "$ACR_NAME" --only-show-errors >/dev/null ||
+    die "docker login to $ACR_NAME failed (the deploy identity needs Container Registry Data Importer and Data Reader; see the R8 tx02v2 contract update)"
+  ACR_LOGGED_IN=1
+  API_IMAGE="$(promote_image api "$API_SOURCE_NAME" "$API_SOURCE_DIGEST" "$API_IMAGE_ID")"
+  WEB_IMAGE="$(promote_image web "$WEB_SOURCE_NAME" "$WEB_SOURCE_DIGEST" "$WEB_IMAGE_ID")"
+  log "promoted the signed API and web digests to $acr_login_server; no image was rebuilt"
 }
 
 # create_pg_ca -> ConfigMap azure-pg-ca with the PEM bundle of the contract roots. Each root is
@@ -392,6 +421,8 @@ data:
   source-commit: "$GIT_SHA"
   api-image-tag: "$GIT_SHA"
   web-image-tag: "$GIT_SHA"
+  api-image-digest: "${API_IMAGE##*@}"
+  web-image-digest: "${WEB_IMAGE##*@}"
 EOF
 }
 
@@ -424,11 +455,12 @@ configure_gitops_application() {
   node "$REPO_ROOT/scripts/render-gitops-application.mjs" azure "$OVERLAY" \
     "$WORK_DIR/params.env" "$REPO_ROOT/deploy/k8s/components/azure/params.example.env" >"$patch"
   kubectl -n argocd patch application dx02v2 --type merge --patch-file "$patch" >/dev/null
-  log "Argo CD Application source configured for $OVERLAY and image tag $GIT_SHA"
+  log "Argo CD Application source configured for $OVERLAY and approved image digests"
 }
 
 publish_gitops_revision() {
-  GITOPS_REV="$(bash "$REPO_ROOT/scripts/publish-gitops.sh" azure "$OVERLAY" "$GIT_SHA")"
+  GITOPS_REV="$(bash "$REPO_ROOT/scripts/publish-gitops.sh" azure "$OVERLAY" "$GIT_SHA" \
+    "${API_IMAGE##*@}" "${WEB_IMAGE##*@}")"
   [[ "$GITOPS_REV" =~ ^[0-9a-f]{40}$ ]] || die "GitOps branch push returned no commit SHA"
   kubectl -n argocd annotate application dx02v2 argocd.argoproj.io/refresh=normal --overwrite >/dev/null
   log "published origin/gitops/azure at ${GITOPS_REV:0:7}"
@@ -509,9 +541,7 @@ main() {
   read_contract
   section "cluster $(param cluster-name): kubeconfig, platform API groups, RBAC"
   connect_cluster
-  section "registry $ACR_NAME: login and existing tags"
-  prepare_images
-  section "images dx02v2/api and dx02v2/web, tag $GIT_SHA"
+  section "registry $ACR_NAME: promote verified image digests"
   publish_images
   section "ConfigMap azure-pg-ca (Azure root CAs, thumbprints checked)"
   create_pg_ca

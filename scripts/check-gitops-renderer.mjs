@@ -8,6 +8,7 @@ if (!patchFile || !manifestsFile) {
   console.error('usage: node scripts/check-gitops-renderer.mjs <application-patch.json> <overlay.yaml>');
   process.exit(2);
 }
+
 const fail = (message) => {
   console.error(message);
   process.exitCode = 1;
@@ -17,8 +18,10 @@ const manifests = parseAllDocuments(readFileSync(manifestsFile, 'utf8'))
   .map((doc) => doc.toJS())
   .filter(Boolean);
 const source = document.spec?.source;
-if (typeof source?.path !== 'string' || !/^deploy\/k8s\/overlays\/(azure|azure-waf)$/.test(source.path))
+if (typeof source?.path !== 'string' || !/^deploy\/k8s\/overlays\/(azure|azure-waf)$/.test(source.path)) {
   fail(`unexpected source path: ${source?.path}`);
+}
+
 const workloads = manifests.flatMap((resource) => {
   const pod = resource.spec?.template?.spec;
   return pod ? [...(pod.initContainers ?? []), ...(pod.containers ?? [])] : [];
@@ -37,14 +40,22 @@ for (const override of images) {
   }
   const sourceName = override.slice(0, separator);
   const targetImage = override.slice(separator + 1);
+  const digestSeparator = targetImage.lastIndexOf('@');
   const tagSeparator = targetImage.lastIndexOf(':');
-  if (tagSeparator <= targetImage.lastIndexOf('/') || !/^[0-9a-f]{40}$/.test(targetImage.slice(tagSeparator + 1))) {
-    fail(`image override must target an image tagged with the full source commit SHA: ${override}`);
+  const digestPinned =
+    digestSeparator > targetImage.lastIndexOf('/') &&
+    /^sha256:[0-9a-f]{64}$/.test(targetImage.slice(digestSeparator + 1));
+  const sourceTagPinned =
+    tagSeparator > targetImage.lastIndexOf('/') && /^[0-9a-f]{40}$/.test(targetImage.slice(tagSeparator + 1));
+  if (!digestPinned && !sourceTagPinned) {
+    fail(`image override must use a sha256 digest or full source commit SHA tag: ${override}`);
     continue;
   }
-  if (!workloads.some((container) => container.image?.startsWith(`${sourceName}:`)))
+  if (!workloads.some((container) => container.image?.startsWith(`${sourceName}:`))) {
     fail(`image source ${sourceName} is absent from the rendered overlay`);
+  }
 }
+
 const patches = source?.kustomize?.patches ?? [];
 if (patches.length === 0) fail('the Application has no cloud-specific Kustomize patches');
 for (const entry of patches) {
@@ -74,9 +85,11 @@ for (const entry of patches) {
     for (const segment of segments.slice(0, -1))
       current = current?.[Array.isArray(current) ? Number(segment) : segment];
     const last = segments.at(-1);
-    if (current === null || typeof current !== 'object' || !(last in current))
+    if (current === null || typeof current !== 'object' || !(last in current)) {
       fail(`replace path ${operation.path} does not exist on ${kind}/${name}`);
+    }
   }
 }
+
 if (process.exitCode) process.exit(process.exitCode);
 console.log(`GitOps renderer: ${source.path}, ${images.length} image overrides, ${patches.length} valid patches`);

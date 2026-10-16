@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dx02v2 harness: every check lives here. `make` targets and every CI job only call this script.
-# Usage: scripts/harness.sh <stage>...   stages: static, test, build, e2e, platform, platform-small, all, list
+# Usage: scripts/harness.sh <stage>...   stages: static, test, build, dast, e2e, platform, platform-small, all, list
 #   HARNESS_STRICT=1   (set in CI) turns every SKIP into a FAIL
 #   HARNESS_VERBOSE=1  also prints the output of passing checks
 #   HARNESS_ONLY=<re>  runs only the checks whose name matches (local debugging; never in CI)
@@ -62,14 +62,21 @@ REQUIRED_FILES=(
   .devcontainer/devcontainer.json
   .github/CODEOWNERS .github/dependabot.yml .github/pull_request_template.md
   .github/ISSUE_TEMPLATE/config.yml .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/cloud_run_report.yml
-  .github/workflows/ci.yml .github/workflows/deploy-azure.yml .github/rulesets/main.json
-  docs/SUSTENTACAO.md docs/GUARDRAILS.md docs/HARNESS.md docs/CONTRATO.md docs/RUNBOOK.md
+  .github/workflows/ci.yml .github/workflows/deploy-azure.yml .github/workflows/publish-images.yml .github/rulesets/main.json sonar-project.properties
+  docs/SUSTENTACAO.md docs/GUARDRAILS.md docs/HARNESS.md docs/CONTRATO.md docs/RUNBOOK.md docs/MIGRATIONS.md
   docs/ARQUITETURA.md docs/API.md docs/PUBLICACAO.md
   tools/versions.env tools/checksums.txt
   scripts/install-tools.sh scripts/update-tool-checksums.sh scripts/harness.sh scripts/repo-guardrails.sh
   scripts/dev-env.sh scripts/compose-smoke.sh scripts/e2e-kind.sh scripts/deploy-azure.sh scripts/render-k8s.sh
   scripts/update-crd-schemas.sh scripts/crd-to-jsonschema.mjs scripts/check-manifests.mjs
   scripts/publish-gitops.sh scripts/render-gitops-application.mjs scripts/check-gitops-renderer.mjs
+  scripts/sonar-bootstrap.sh scripts/sonar-service.sh scripts/install-sonar-scanner.sh scripts/test-sonar-gate.sh
+  scripts/check-codeql-sarif.mjs scripts/test-gitleaks-gate.sh scripts/dast-zap.sh
+  scripts/verify-ci-image-artifact.sh scripts/publish-ghcr-images.sh scripts/get-publish-run-metadata.sh
+  scripts/verify-release-bundle.sh scripts/test-zap-gate.sh
+  security/dast-baseline.conf security/fixtures/sonar/uncovered.ts security/fixtures/sonar/fixture.lcov
+  security/fixtures/dast/server.mjs security/fixtures/dast/zap.conf docs/SEGURANCA_CI.md
+  api/migrations/0001_create_messages.sql api/migrations/0002_expand_message_display_name.sql
   deploy/k8s/components/azure/params.example.env deploy/k8s/schemas/source.env
   deploy/k8s/overlays/azure/gitops-revision.yaml deploy/k8s/overlays/azure-waf/gitops-revision.yaml
 )
@@ -455,17 +462,47 @@ check_policy_workflows() {
     echo "Azure access is OIDC only (azure/login with client-id, tenant-id, subscription-id): no service principal secrets"
     rc=1
   fi
-  if grep -nE '\$\{\{[[:space:]]*(github\.event\.)?inputs\.' "${files[@]}"; then
-    echo "never interpolate workflow inputs into the workflow (pass data through env, validated by the script)"
-    rc=1
-  fi
+  for f in "${files[@]}"; do
+    out="$(awk -v file="$f" '
+      function indentation(line, prefix) {
+        prefix = line
+        sub(/[^ ].*$/, "", prefix)
+        return length(prefix)
+      }
+      /^[[:space:]-]*run:/ {
+        run_indent = indentation($0)
+        in_run = 1
+        if ($0 ~ /\$\{\{[[:space:]]*(github\.event\.)?inputs\./) {
+          printf "%s:%d: workflow inputs must not be interpolated into shell commands\n", file, NR
+          bad = 1
+        }
+        next
+      }
+      in_run {
+        if ($0 !~ /^[[:space:]]*$/ && indentation($0) <= run_indent) in_run = 0
+        if (in_run && $0 ~ /\$\{\{[[:space:]]*(github\.event\.)?inputs\./) {
+          printf "%s:%d: workflow inputs must not be interpolated into shell commands\n", file, NR
+          bad = 1
+        }
+      }
+      END { exit bad }
+    ' "$f")" || {
+      printf '%s\n' "$out"
+      rc=1
+    }
+  done
   local wf=.github/workflows/deploy-azure.yml v
   if ! grep -qE '^  workflow_dispatch:[[:space:]]*$' "$wf" ||
     grep -qE '^  (push|pull_request|pull_request_target|schedule|workflow_run|workflow_call|repository_dispatch):' "$wf" ||
-    grep -qE '^    inputs:' "$wf"; then
-    echo "$wf must be workflow_dispatch only, without inputs (cloud workflow)"
+    ! grep -qE '^      release_run_id:' "$wf" ||
+    ! grep -qE '^        required: true$' "$wf"; then
+    echo "$wf must be manual-only and require the verified release run id"
     rc=1
   fi
+  grep -qE '^  verify-release:[[:space:]]*$' "$wf" || {
+    echo "$wf must verify the release before the protected lab environment"
+    rc=1
+  }
   grep -qE '^    environment: lab$' "$wf" || {
     echo "$wf: the deploy job must use environment: lab (OIDC subject repo:<owner>/dx02v2:environment:lab)"
     rc=1
@@ -476,10 +513,6 @@ check_policy_workflows() {
   }
   [[ "$(grep -c 'id-token: write' "$wf")" == 1 && "$(grep -cE '^      id-token: write$' "$wf")" == 1 ]] || {
     echo "$wf: id-token: write exactly once, in the permissions of the deploy job"
-    rc=1
-  }
-  [[ "$(awk '/^    steps:/ { s = 1; next } s && /^      - name:/ { sub(/^      - name:[[:space:]]*/, ""); print; exit }' "$wf")" == 'Check repository variables' ]] || {
-    echo "$wf: the first step must be 'Check repository variables'"
     rc=1
   }
   for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_APPCONFIG_ENDPOINT; do
@@ -496,6 +529,10 @@ check_policy_workflows() {
     echo "$wf: kubectl and kubelogin must come from scripts/install-tools.sh (.tools)"
     rc=1
   }
+  grep -qF 'needs: verify-release' "$wf" || {
+    echo "$wf: deploy must depend on verify-release before entering environment lab"
+    rc=1
+  }
   return "$rc"
 }
 
@@ -508,7 +545,8 @@ check_policy_images() {
     rc=1
   }
   out="$(grep -rnhE '^[[:space:]-]*image:[[:space:]]' compose.yaml deploy/k8s .github/workflows kind |
-    grep -vE '@sha256:[0-9a-f]{64}' | grep -vE 'image:[[:space:]]+dx02v2-(api|web)(:local)?[[:space:]]*$')" || true
+    grep -vE '@sha256:[0-9a-f]{64}' |
+    grep -vE 'image:[[:space:]]+(dx02v2-(api|web)(:local)?|\$\{(API|WEB)_IMAGE:-dx02v2-(api|web):local\})[[:space:]]*$')" || true
   [[ -z "$out" ]] || {
     printf 'images must be pinned by digest (only dx02v2-api/dx02v2-web are built here):\n%s\n' "$out"
     rc=1
@@ -551,6 +589,14 @@ check_policy_app() {
   }
   grep -qE '^[[:space:]]*server_tokens off;' web/nginx/default.conf || {
     echo "web/nginx/default.conf: server_tokens off is required"
+    rc=1
+  }
+  grep -qE '^add_header Cross-Origin-Embedder-Policy "require-corp" always;$' web/nginx/security-headers.conf || {
+    echo 'web/nginx/security-headers.conf: Cross-Origin-Embedder-Policy require-corp is required'
+    rc=1
+  }
+  grep -qE '^add_header Cross-Origin-Resource-Policy "same-origin" always;$' web/nginx/security-headers.conf || {
+    echo 'web/nginx/security-headers.conf: Cross-Origin-Resource-Policy same-origin is required'
     rc=1
   }
   return "$rc"
@@ -626,7 +672,7 @@ check_shellcheck() {
   need shellcheck
   mapfile -t files < <(find scripts -type f -name '*.sh' | sort)
   printf 'shellcheck: %s\n' "${files[@]}"
-  shellcheck --external-sources --severity=style "${files[@]}"
+  shellcheck --external-sources --severity=style -P scripts "${files[@]}"
 }
 
 check_kubeconform() {
@@ -701,18 +747,49 @@ check_contract_app() {
       rc=1
     fi
   done
+  node - "$example" "$dir/digest-params.env" <<'NODE'
+const fs = require('node:fs');
+const [source, target] = process.argv.slice(2);
+const digest = 'a'.repeat(64);
+const rows = fs.readFileSync(source, 'utf8').split(/\r?\n/).map((row) => {
+  const separator = row.indexOf('=');
+  if (separator < 0) return row;
+  const key = row.slice(0, separator);
+  if (key !== 'API_IMAGE' && key !== 'WEB_IMAGE') return row;
+  const value = row.slice(separator + 1);
+  return key + '=' + value.replace(/:[0-9a-f]{40}$/, '@sha256:' + digest);
+});
+fs.writeFileSync(target, rows.join('\n'));
+NODE
+  k8s_validate_params "$dir/digest-params.env" || rc=1
+  if node scripts/render-gitops-application.mjs azure azure "$dir/digest-params.env" "$example" \
+    >"$dir/gitops-patches/digest.json"; then
+    node scripts/check-gitops-renderer.mjs "$dir/gitops-patches/digest.json" "$dir/azure.yaml" || rc=1
+    grep -qF '@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+      "$dir/gitops-patches/digest.json" || {
+      echo "deploy-azure GitOps rendering must retain the exact approved digest"
+      rc=1
+    }
+  else
+    rc=1
+  fi
   expected_mode="DEPLOY_MODE=\"\${DEPLOY_MODE:-gitops}\""
   if ! grep -qF 'DEPLOY_MODE: gitops' .github/workflows/deploy-azure.yml ||
     ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
-    grep -qE '^    inputs:' .github/workflows/deploy-azure.yml ||
-    ! grep -qF "$expected_mode" scripts/deploy-azure.sh; then
-    echo "deploy-azure must default to the GitOps branch publishing mode"
+    ! grep -qF "$expected_mode" scripts/deploy-azure.sh ||
+    grep -qF 'docker build' scripts/deploy-azure.sh ||
+    ! grep -qF "bash \"\$REPO_ROOT/scripts/verify-release-bundle.sh\"" scripts/deploy-azure.sh ||
+    ! grep -qF "docker pull \"\$source_ref\"" scripts/deploy-azure.sh ||
+    ! grep -qF 'az acr import' scripts/deploy-azure.sh; then
+    echo "deploy-azure must verify the release, promote by digest without rebuilding, and publish GitOps"
     rc=1
   fi
   expected_push="git -C \"\$tmp/repo\" push --quiet origin \"HEAD:refs/heads/\$branch\""
   if ! grep -qF "$expected_push" scripts/publish-gitops.sh ||
-    grep -q -- '--force' scripts/publish-gitops.sh; then
-    echo "publish-gitops.sh must push the cloud branch without force"
+    grep -q -- '--force' scripts/publish-gitops.sh ||
+    ! grep -qF "api-image-digest: \"\$api_digest\"" scripts/publish-gitops.sh ||
+    ! grep -qF "web-image-digest: \"\$web_digest\"" scripts/publish-gitops.sh; then
+    echo "publish-gitops.sh must record immutable image digests and push without force"
     rc=1
   fi
   summary "contract: ${#CONTRACT_APPCONFIG_KEYS[@]} App Configuration keys, ${#CONTRACT_PG_CA_THUMBPRINTS[@]} root CA thumbprints, manifests of ${K8S_OVERLAYS[*]}"
@@ -739,12 +816,28 @@ check_trivy_config() {
     --cache-dir "$HARNESS_WORK_DIR/trivy-cache" --ignorefile .trivyignore.yaml "$dir"
 }
 
+check_trivy_fs() {
+  need trivy
+  trivy fs --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+    --cache-dir "$HARNESS_WORK_DIR/trivy-cache" --ignorefile .trivyignore.yaml \
+    --format table . | tee "$HARNESS_WORK_DIR/trivy-filesystem.txt"
+}
+
 check_gitleaks() {
   local dir="$HARNESS_WORK_DIR/gitleaks-tree"
+  local history_output history_status history_count
   need gitleaks git
   if git rev-parse --verify -q HEAD >/dev/null; then
     echo "repository has commits: scanning the full history (gitleaks git)"
-    gitleaks git --no-banner --redact --verbose --log-level warn .
+    if history_output="$(gitleaks git --no-banner --redact --verbose --log-level info . 2>&1)"; then
+      history_status=0
+    else
+      history_status=$?
+    fi
+    printf '%s\n' "$history_output"
+    ((history_status == 0)) || return "$history_status"
+    history_count="$(printf '%s\n' "$history_output" | tr -d '\033' | sed -E 's/\[[0-9;]*m//g' | grep -Eo '[0-9]+ commits scanned\.?$' | tail -n 1 | cut -d ' ' -f 1)"
+    [[ "$history_count" =~ ^[1-9][0-9]*$ ]] || die "gitleaks reported a clean history scan without scanning any commits"
   fi
   # The files that would be committed (tracked + untracked, minus .gitignore): never node_modules,
   # .env or other ignored local files.
@@ -755,6 +848,11 @@ check_gitleaks() {
     [[ -f "$f" ]] && printf '%s\0' "$f"
   done | tar --null -T - -cf - | tar -xf - -C "$dir"
   gitleaks dir --no-banner --redact --verbose --log-level warn "$dir"
+}
+
+check_gitleaks_negative_gate() {
+  need gitleaks node
+  bash scripts/test-gitleaks-gate.sh
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -824,6 +922,20 @@ check_test_api() {
   DB_HOST=127.0.0.1 DB_PORT="$port" DB_NAME=dx02v2_test DB_USER=dx02v2 DB_PASSWORD="$password" run_vitest api
 }
 
+check_codeql_security() {
+  need node
+  node scripts/check-codeql-sarif.mjs --self-test
+  if [[ -n "${CODEQL_SARIF_PATH:-}" ]]; then
+    node scripts/check-codeql-sarif.mjs "$CODEQL_SARIF_PATH"
+  fi
+}
+
+check_dast_zap() {
+  need_docker
+  bash scripts/dast-zap.sh
+  bash scripts/test-zap-gate.sh
+}
+
 check_test_web() {
   need node npx
   [[ -d node_modules ]] || skip "node_modules is missing (check npm-ci)"
@@ -851,7 +963,8 @@ check_image() { # api|web
     }
     echo "using the prebuilt image $ref"
   else
-    docker build -f "$1/Dockerfile" --build-arg GIT_SHA="$(git_sha)" -t "$ref" .
+    docker build -f "$1/Dockerfile" --build-arg GIT_SHA="$(git_sha)" \
+      --build-arg "SOURCE_REPOSITORY=${SOURCE_REPOSITORY:-maringelix/dx02v2}" -t "$ref" .
   fi
   summary "$ref: $(docker image inspect "$ref" --format '{{.Size}}' | awk '{ printf "%.0f MB", $1 / 1000000 }')"
 }
@@ -987,8 +1100,11 @@ register_checks() {
   register static contract-app check_contract_app
   register static promtool-rules check_promtool_rules
   register static trivy-config check_trivy_config
+  register static trivy-filesystem check_trivy_fs
   register static gitleaks check_gitleaks
+  register static gitleaks-negative-gate check_gitleaks_negative_gate
   register test npm-ci check_npm_ci
+  register test codeql-security check_codeql_security
   register test test:api check_test_api
   register test test:web check_test_web
   register build npm-ci check_npm_ci
@@ -1000,6 +1116,7 @@ register_checks() {
   register build trivy-image:api "check_trivy_image api"
   register build trivy-image:web "check_trivy_image web"
   register e2e kind-e2e check_kind_e2e
+  register dast zap-baseline check_dast_zap
   register platform platform-e2e check_platform_e2e
   register platform-small platform-small-e2e check_platform_small_e2e
 }
@@ -1063,10 +1180,11 @@ run_check() {
 list_checks() {
   local i
   echo "stages:"
-  echo "  static  policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, CRD schemas, kubeconform, contract, promtool rules, trivy config, gitleaks"
-  echo "  test    API unit + integration tests (real PostgreSQL 17) and web tests, with coverage gates"
+  echo "  static  policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, kubeconform, contract, Trivy config/filesystem, gitleaks + negative gate"
+  echo "  test    API + web tests and coverage gates; CodeQL SARIF gate when CI provides a report"
   echo "  build   npm build, docker images, image policy, trivy image gate (HIGH/CRITICAL, fixable)"
   echo "  e2e     kind cluster: manifests, PSA restricted, smoke test, NetworkPolicy enforcement"
+  echo "  dast    OWASP ZAP Baseline against the disposable Compose app"
   echo "  platform the app on the full tx02v2 local platform (GitOps, mesh, observability, policies, backup, chaos)"
   echo "  platform-small the same e2e on the small platform size, inside Docker limited to 7 GB (heavy: CI only)"
   echo "  all     static + test + build + e2e"
@@ -1077,7 +1195,7 @@ list_checks() {
 }
 
 usage() {
-  echo "usage: $0 <stage>...   (stages: static, test, build, e2e, platform, platform-small, all, list)" >&2
+  echo "usage: $0 <stage>...   (stages: static, test, build, e2e, dast, platform, platform-small, all, list)" >&2
   exit 2
 }
 
@@ -1089,7 +1207,7 @@ main() {
   register_checks
   for arg in "$@"; do
     case "$arg" in
-      static | test | build | e2e | platform | platform-small) stages+=("$arg") ;;
+      static | test | build | e2e | dast | platform | platform-small) stages+=("$arg") ;;
       all) stages+=(static test build e2e) ;;
       list)
         list_checks

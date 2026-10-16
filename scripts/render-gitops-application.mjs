@@ -31,11 +31,15 @@ function required(params, key) {
 }
 
 function image(value, key) {
+  const digestSeparator = value.lastIndexOf('@');
+  if (digestSeparator > 0 && /^sha256:[0-9a-f]{64}$/.test(value.slice(digestSeparator + 1))) {
+    return { name: value.slice(0, digestSeparator), reference: value };
+  }
   const colon = value.lastIndexOf(':');
   if (colon <= value.lastIndexOf('/') || !/^[0-9a-f]{40}$/.test(value.slice(colon + 1))) {
-    fail(`${key} must end in a full source commit SHA tag`);
+    fail(`${key} must end in a full source commit SHA tag or a sha256 digest`);
   }
-  return { name: value.slice(0, colon), tag: value.slice(colon + 1) };
+  return { name: value.slice(0, colon), reference: value };
 }
 
 const [cloud, overlay, actualFile, exampleFile] = process.argv.slice(2);
@@ -49,6 +53,14 @@ const api = image(required(actual, 'API_IMAGE'), 'API_IMAGE');
 const web = image(required(actual, 'WEB_IMAGE'), 'WEB_IMAGE');
 const apiExample = image(required(example, 'API_IMAGE'), 'example API_IMAGE');
 const webExample = image(required(example, 'WEB_IMAGE'), 'example WEB_IMAGE');
+if (
+  !api.name.endsWith('/dx02v2/api') ||
+  !apiExample.name.endsWith('/dx02v2/api') ||
+  !web.name.endsWith('/dx02v2/web') ||
+  !webExample.name.endsWith('/dx02v2/web')
+) {
+  fail('runtime and example images must use the dx02v2/api and dx02v2/web repositories');
+}
 const patches = [];
 const addPatch = (kind, name, path, value) => {
   patches.push({ target: { kind, name }, patch: JSON.stringify([{ op: 'replace', path, value }]) });
@@ -88,7 +100,7 @@ const document = {
     source: {
       path: `deploy/k8s/overlays/${overlay}`,
       kustomize: {
-        images: [`${apiExample.name}=${api.name}:${api.tag}`, `${webExample.name}=${web.name}:${web.tag}`],
+        images: [`${apiExample.name}=${api.reference}`, `${webExample.name}=${web.reference}`],
         patches,
       },
     },

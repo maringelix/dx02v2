@@ -1,14 +1,15 @@
-# Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRATO.md). CLOUD-MUTATING
-# and billable (ACR images, Application Gateway for Containers programmed by the ALB Controller):
-# dispatch manually after the tx02v2 apply and platform workflows; tear down with the tx02v2
-# destroy. The `lab` environment (required reviewer, main only) gates the federated credential of
-# the managed identity dx02v2-gha-deploy (subject repo:<owner>/dx02v2:environment:lab). Not run in
-# the cloud yet (v2). Every step of the deploy lives in scripts/deploy-azure.sh, the same script a
-# laptop runs.
+# Cloud-mutating and billable: promotes a signed GHCR release to ACR and deploys it to AKS.
+# Dispatch from main with the run id of a successful publish-images run. The release is fully
+# verified before the lab environment approval and again before Azure credentials are requested.
 name: deploy-azure
 
 on:
   workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful publish-images workflow run id for the release to deploy
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,34 +19,100 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the publisher run and release artifact
+        id: release
+        run: bash scripts/get-publish-run-metadata.sh
+
+      - name: Download the immutable release bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ steps.release.outputs.artifact_name }}
+          run-id: ${{ steps.release.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/dx02v2-release
+
+      - name: Verify source CI, image digests, SBOM checksums, and attestations
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: bash scripts/verify-release-bundle.sh
+
+      - name: Preserve the verified bundle for the approved deploy job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dx02v2-verified-release
+          path: ${{ runner.temp }}/dx02v2-release/
+          retention-days: 1
+          if-no-files-found: error
+
   deploy:
+    needs: verify-release
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: lab
     permissions:
+      actions: read
+      attestations: read
       contents: write
       id-token: write
+      packages: read
     env:
+      AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
       DEPLOY_MODE: gitops
+      GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download the previously verified release bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dx02v2-verified-release
+          path: ${{ runner.temp }}/dx02v2-release
+
+      - name: Re-verify the bundle and signer before requesting Azure credentials
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
+        run: bash scripts/verify-release-bundle.sh
+
       - name: Check repository variables
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
         run: |
           guid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
           problems=()
-          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_APPCONFIG_ENDPOINT; do
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
             if [[ -z "${!v}" ]]; then
               problems+=("$v is not set")
-            elif [[ "$v" != AZURE_APPCONFIG_ENDPOINT && ! "${!v}" =~ $guid ]]; then
+            elif [[ ! "${!v}" =~ $guid ]]; then
               problems+=("$v is not a lowercase GUID")
             fi
           done
-          if [[ -n "$AZURE_APPCONFIG_ENDPOINT" && ! "$AZURE_APPCONFIG_ENDPOINT" =~ ^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$ ]]; then
+          if [[ -z "$AZURE_APPCONFIG_ENDPOINT" ]]; then
+            problems+=("AZURE_APPCONFIG_ENDPOINT is not set")
+          elif [[ ! "$AZURE_APPCONFIG_ENDPOINT" =~ ^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$ ]]; then
             problems+=("AZURE_APPCONFIG_ENDPOINT is not https://tx02v2-lab-<suffix>.azconfig.io")
           fi
           if ((${#problems[@]} > 0)); then
@@ -54,10 +121,8 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
+      - name: Authenticate to GHCR for the verified image digests
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -66,16 +131,18 @@ jobs:
       - name: Install kubectl and kubelogin (pinned, SHA256-verified)
         run: bash scripts/install-tools.sh kubectl kubelogin
 
-      # Right before the deploy: the GitHub OIDC assertion lives 5-10 minutes, and the deploy
-      # acquires every Azure token it needs in its first minutes.
+      # Right before the deploy: the GitHub OIDC assertion lives 5-10 minutes.
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy (scripts/deploy-azure.sh)
+      - name: Deploy the verified digests (no rebuild)
         env:
-          AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
-          GIT_SHA: ${{ github.sha }}
+          RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
         run: bash scripts/deploy-azure.sh
+
+      - name: Remove GHCR credentials
+        if: always()
+        run: docker logout ghcr.io

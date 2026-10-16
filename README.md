@@ -44,6 +44,8 @@ The lab family (v2):
 | API unit + integration tests against a real PostgreSQL 17 (coverage gate: lines >= 80 %, branches >= 70 %) | `verified in CI` | `make test` (`test:api`); CI job `test` |
 | Web tests with Testing Library + jsdom (coverage gate: lines >= 70 %) | `verified in CI` | `make test` (`test:web`); CI job `test` |
 | Images: build, numeric non-root user, no npm or shell in the API runtime, trivy HIGH/CRITICAL gate | `verified in CI` | `make build`; CI job `images` |
+| DevSecOps gates: CodeQL SARIF, SonarQube Quality Gate, Trivy filesystem and image scans, Gitleaks history and negative fixture, OWASP ZAP Baseline | `verified in CI` | CI jobs `static`, `test`, `images`; `make dast`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
+| Release supply chain: reuse CI-tested image IDs, publish by digest with SPDX SBOMs and Sigstore attestations, verify before ACR promotion and Argo CD deploy | `workflow implemented; release not yet published` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
 | Compose stack (PostgreSQL → migrate → api → web on 127.0.0.1) + smoke test | `verified locally` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, not part of CI) |
 | kind end-to-end: Pod Security `restricted`, smoke test through nginx, NetworkPolicy enforcement | `verified in CI` | `make e2e` (`scripts/e2e-kind.sh`); CI job `e2e` |
 | Azure deploy (ACR, AKS of tx02v2, ExternalSecrets, Application Gateway for Containers + WAF, traces to the OpenTelemetry Collector and Application Insights, smoke test; the workflow uses Argo CD GitOps, with direct push available through the script) | `not run in the cloud (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
@@ -153,6 +155,7 @@ All docs are in Brazilian Portuguese.
 | [docs/API.md](docs/API.md) | endpoints, errors, curl examples |
 | [docs/CONTRATO.md](docs/CONTRATO.md) | tx02v2 ⇄ dx02v2 contract v2 (app side; source of truth in tx02v2) |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | local development, compose, kind e2e, Azure deploy |
+| [docs/SEGURANCA_CI.md](docs/SEGURANCA_CI.md) | DevSecOps gates, signed image releases, SBOMs and attestations |
 | [docs/LAB_LOCAL.md](docs/LAB_LOCAL.md) | the app on the tx02v2 local platform (GitOps deploy, probes, limits) |
 | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | rules, enforcement, exceptions, limits |
 | [docs/HARNESS.md](docs/HARNESS.md) | checks, strict mode, troubleshooting |

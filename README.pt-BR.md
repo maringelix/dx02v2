@@ -45,6 +45,8 @@ A família do lab (v2):
 | Testes unitários + de integração da API contra um PostgreSQL 17 real (gate de cobertura: linhas >= 80 %, branches >= 70 %) | `verificado no CI` | `make test` (`test:api`); job `test` do CI |
 | Testes da página com Testing Library + jsdom (gate de cobertura: linhas >= 70 %) | `verificado no CI` | `make test` (`test:web`); job `test` do CI |
 | Imagens: build, usuário numérico não root, sem npm nem shell no runtime da API, gate do trivy HIGH/CRITICAL | `verificado no CI` | `make build`; job `images` do CI |
+| Gates DevSecOps: SARIF do CodeQL, Quality Gate do SonarQube, scans de filesystem e imagem do Trivy, histórico e fixture negativa do Gitleaks, OWASP ZAP Baseline | `verificado no CI` | jobs `static`, `test`, `images`; `make dast`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
+| Cadeia de release: reutiliza IDs das imagens testadas no CI, publica por digest com SBOM SPDX e attestations Sigstore, valida antes da promoção para ACR e do deploy via Argo CD | `workflow implementado; release ainda não publicado` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
 | Stack do compose (PostgreSQL → migrate → api → web em 127.0.0.1) + smoke test | `verificado localmente` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, fora do CI) |
 | Ponta a ponta no kind: Pod Security `restricted`, smoke test pelo nginx, enforcement de NetworkPolicy | `verificado no CI` | `make e2e` (`scripts/e2e-kind.sh`); job `e2e` do CI |
 | Deploy na Azure (ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, traces para o OpenTelemetry Collector e o Application Insights, smoke test; workflow com GitOps do Argo CD, push direto pelo script como alternativa) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
@@ -152,6 +154,7 @@ test pelo Application Gateway for Containers → destroy do tx02v2 + checagem de
 | [docs/API.md](docs/API.md) | endpoints, erros, exemplos em curl |
 | [docs/CONTRATO.md](docs/CONTRATO.md) | contrato tx02v2 ⇄ dx02v2 v2 (lado do app; fonte da verdade no tx02v2) |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | desenvolvimento local, compose, e2e no kind, deploy na Azure |
+| [docs/SEGURANCA_CI.md](docs/SEGURANCA_CI.md) | gates DevSecOps, releases assinados, SBOMs e attestations |
 | [docs/LAB_LOCAL.md](docs/LAB_LOCAL.md) | o app na plataforma local do tx02v2 (deploy GitOps, sondas, limites) |
 | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | regras, aplicação, exceções, limites |
 | [docs/HARNESS.md](docs/HARNESS.md) | checks, modo estrito, problemas comuns |
