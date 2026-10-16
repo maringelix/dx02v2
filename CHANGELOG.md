@@ -74,6 +74,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `deploy-azure.yml` provides the release directory only in steps, where the `runner` context is
+  available, and the platform smoke assertions run after the zero-downtime rollout promotes the
+  branch image used by the new security-header checks.
+- The GitOps renderer accepts a fork's registry hostname while still requiring the `dx02v2/api` and
+  `dx02v2/web` repository paths for runtime and example images.
 - `scripts/deploy-local.sh` waits until each Deployment has the expected image tag before checking its
   rollout, so Argo CD sync status cannot make the previous image look like the new release.
 

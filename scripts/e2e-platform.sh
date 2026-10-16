@@ -768,15 +768,17 @@ main() {
     bash "$REPO_ROOT/scripts/deploy-local.sh"
   pass "gitops: deployed previous content $PREVIOUS_SHA from distinct image artifacts"
   probe_namespace
-  # The drill writes twice; the smoke test then uses up the write budget of the shared client address.
   check_db_backup
-  check_smoke
   check_mesh
   check_observability
   check_tracing
   check_trivy
   check_hpa
   check_zero_downtime
+  # The platform starts on the previous main image for rollback coverage; exercise current headers
+  # only after the zero-downtime promotion installs this branch's image.
+  check_smoke
+  # The drill writes twice; the smoke test then uses up the write budget of the shared client address.
   check_failed_rollout_and_rollback
   check_self_heal
   check_chaos

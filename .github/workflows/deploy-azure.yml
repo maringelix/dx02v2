@@ -78,7 +78,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
       RELEASE_RUN_ID: ${{ inputs.release_run_id }}
-      RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,6 +91,8 @@ jobs:
           path: ${{ runner.temp }}/dx02v2-release
 
       - name: Re-verify the bundle and signer before requesting Azure credentials
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
         run: bash scripts/verify-release-bundle.sh
 
       - name: Check repository variables
@@ -138,6 +139,8 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy the verified digests (no rebuild)
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/dx02v2-release
         run: bash scripts/deploy-azure.sh
 
       - name: Remove GHCR credentials

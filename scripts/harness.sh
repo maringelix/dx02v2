@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dx02v2 harness: every check lives here. `make` targets and every CI job only call this script.
-# Usage: scripts/harness.sh <stage>...   stages: static, test, build, e2e, platform, platform-small, all, list
+# Usage: scripts/harness.sh <stage>...   stages: static, test, build, dast, e2e, platform, platform-small, all, list
 #   HARNESS_STRICT=1   (set in CI) turns every SKIP into a FAIL
 #   HARNESS_VERBOSE=1  also prints the output of passing checks
 #   HARNESS_ONLY=<re>  runs only the checks whose name matches (local debugging; never in CI)
@@ -62,14 +62,21 @@ REQUIRED_FILES=(
   .devcontainer/devcontainer.json
   .github/CODEOWNERS .github/dependabot.yml .github/pull_request_template.md
   .github/ISSUE_TEMPLATE/config.yml .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/cloud_run_report.yml
-  .github/workflows/ci.yml .github/workflows/deploy-azure.yml .github/rulesets/main.json
-  docs/SUSTENTACAO.md docs/GUARDRAILS.md docs/HARNESS.md docs/CONTRATO.md docs/RUNBOOK.md
+  .github/workflows/ci.yml .github/workflows/deploy-azure.yml .github/workflows/publish-images.yml .github/rulesets/main.json sonar-project.properties
+  docs/SUSTENTACAO.md docs/GUARDRAILS.md docs/HARNESS.md docs/CONTRATO.md docs/RUNBOOK.md docs/MIGRATIONS.md
   docs/ARQUITETURA.md docs/API.md docs/PUBLICACAO.md
   tools/versions.env tools/checksums.txt
   scripts/install-tools.sh scripts/update-tool-checksums.sh scripts/harness.sh scripts/repo-guardrails.sh
   scripts/dev-env.sh scripts/compose-smoke.sh scripts/e2e-kind.sh scripts/deploy-azure.sh scripts/render-k8s.sh
   scripts/update-crd-schemas.sh scripts/crd-to-jsonschema.mjs scripts/check-manifests.mjs
   scripts/publish-gitops.sh scripts/render-gitops-application.mjs scripts/check-gitops-renderer.mjs
+  scripts/sonar-bootstrap.sh scripts/sonar-service.sh scripts/install-sonar-scanner.sh scripts/test-sonar-gate.sh
+  scripts/check-codeql-sarif.mjs scripts/test-gitleaks-gate.sh scripts/dast-zap.sh
+  scripts/verify-ci-image-artifact.sh scripts/publish-ghcr-images.sh scripts/get-publish-run-metadata.sh
+  scripts/verify-release-bundle.sh scripts/test-zap-gate.sh
+  security/dast-baseline.conf security/fixtures/sonar/uncovered.ts security/fixtures/sonar/fixture.lcov
+  security/fixtures/dast/server.mjs security/fixtures/dast/zap.conf docs/SEGURANCA_CI.md
+  api/migrations/0001_create_messages.sql api/migrations/0002_expand_message_display_name.sql
   deploy/k8s/components/azure/params.example.env deploy/k8s/schemas/source.env
   deploy/k8s/overlays/azure/gitops-revision.yaml deploy/k8s/overlays/azure-waf/gitops-revision.yaml
 )
@@ -771,8 +778,8 @@ NODE
     ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
     ! grep -qF "$expected_mode" scripts/deploy-azure.sh ||
     grep -qF 'docker build' scripts/deploy-azure.sh ||
-    ! grep -qF 'bash "$REPO_ROOT/scripts/verify-release-bundle.sh"' scripts/deploy-azure.sh ||
-    ! grep -qF 'docker pull "$source_ref"' scripts/deploy-azure.sh ||
+    ! grep -qF "bash \"\$REPO_ROOT/scripts/verify-release-bundle.sh\"" scripts/deploy-azure.sh ||
+    ! grep -qF "docker pull \"\$source_ref\"" scripts/deploy-azure.sh ||
     ! grep -qF 'az acr import' scripts/deploy-azure.sh; then
     echo "deploy-azure must verify the release, promote by digest without rebuilding, and publish GitOps"
     rc=1
