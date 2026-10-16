@@ -115,42 +115,27 @@ cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/C
 
 ## 7. Deploy
 
-Actions > `deploy-azure` > Run workflow (branch `main`) e aprove o environment `lab`. O job confere
-as variáveis, instala kubectl e kubelogin fixados, faz o login OIDC (`azure/login` v3.1.0) e roda
+No Actions, abra `deploy-azure`, escolha a branch `main`, selecione `mode=gitops` (padrão) e aprove
+o environment `lab`. O modo GitOps exige o perfil `full` do tx02v2, a Application `dx02v2` no Argo
+CD e permissão para publicar `gitops/azure`. Use `mode=push` somente se o Argo CD não estiver
+gerenciando o app.
+
+O job confere as variáveis, instala `kubectl`/`kubelogin`, autentica com `azure/login` e roda
 `scripts/deploy-azure.sh`, que:
 
-1. lê as 15 chaves `tx02v2/lab/*` da App Configuration (`az appconfig kv list --auth-mode login`) e
-   confere os valores fixos do contrato (grupo de recursos, cluster, segredos, ClusterSecretStore) e
-   os formatos (registry, IDs, CIDRs; a subnet do AGC precisa ser /24) antes de mudar qualquer coisa;
-2. gera um kubeconfig temporário (`az aks get-credentials` + `kubelogin convert-kubeconfig -l azurecli`),
-   confere que o cluster serve `gateway.networking.k8s.io/v1`, `alb.networking.azure.io/v1` e
-   `external-secrets.io/v1` e que o principal pode escrever cada tipo do overlay no namespace `dx02v2`
-   (`kubectl auth can-i`); todos os tokens Azure são obtidos aqui, nos primeiros minutos;
-3. faz login no ACR e lista as tags: uma tag que já existe **nunca** é sobrescrita (o ACR Basic não tem
-   imutabilidade) — a imagem daquele commit é reaproveitada;
-4. constrói as imagens `linux/amd64` que faltam e publica `dx02v2/api:<sha>` e `dx02v2/web:<sha>`;
-5. cria o ConfigMap `azure-pg-ca` com as três raízes do contrato (baixa cada uma em DER, confere o
-   thumbprint SHA-1, converte para PEM; recusa qualquer diferença);
-6. renderiza o overlay `azure-waf` (ou `azure`, quando `waf/policy-id` é `none`; nesse caso apaga uma
-   WebApplicationFirewallPolicy antiga) com os valores da App Configuration e aplica com
-   `kubectl apply -k`;
-7. espera os ExternalSecrets `db-credentials` e `app-secrets`, os rollouts, o Gateway `Programmed` com
-   o endereço do frontend e, com o WAF, a WebApplicationFirewallPolicy `Accepted`;
-8. roda `e2e/smoke.mjs` pelo Application Gateway for Containers com `SMOKE_EDGE=agc` (até 15 minutos de
-   espera pelo DNS e pelos health probes) e escreve o resumo do job. O frontend do AGC só fala HTTP
-   (HTTPS nas nuvens está fora do escopo da v2): o token de admin não é lido nem enviado, e o smoke
-   test pula a chamada `DELETE` com o token (`SKIP` no resumo); as chamadas com token errado rodam.
+1. lê as 15 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos e formatos;
+2. obtém kubeconfig temporário, confere API groups, a RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
+3. faz login no ACR, reaproveita tags existentes, constrói e publica as imagens `linux/amd64` que faltam;
+4. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas e renderiza/valida o overlay `azure-waf` ou `azure`. Em `mode=gitops`, configura os valores reais na Application, publica o commit do app com `params.env` de exemplo na branch `gitops/azure` e pede refresh ao Argo CD. Em `mode=push`, aplica o overlay com `kubectl apply -k`;
+5. no modo GitOps, espera a Application estar `Synced` e `Healthy` no commit publicado; depois espera ExternalSecrets e rollouts e confere as imagens SHA nos Deployments;
+6. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. Como o frontend só fala HTTP, o token de admin não é lido nem enviado.
 
-A partir de um laptop (working tree limpo e no commit que você quer publicar, porque a tag é o SHA):
+De um laptop, faça `az login`, selecione a assinatura do lab e configure a autenticação Git para publicar a branch:
 
-```bash
-make tools                                   # kubectl e kubelogin fixados
-az login && az account set --subscription <assinatura do lab>
-AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
-```
+    make tools
+    AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
 
-Em Apple Silicon o build `linux/amd64` roda emulado (mais lento): o contrato fixa nós x86-64 no
-tx02v2, e as imagens são `linux/amd64`.
+Sem Argo CD, use `DEPLOY_MODE=push AZURE_APPCONFIG_ENDPOINT=... scripts/deploy-azure.sh`.
 
 ## 8. Conferir
 

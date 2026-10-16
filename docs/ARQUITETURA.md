@@ -81,7 +81,7 @@ flowchart LR
   gw -.->|"programa"| fe
   api -->|"TLS verify-full (ConfigMap azure-pg-ca)"| pg[("PostgreSQL Flexible Server 17<br/>subnet delegada, privado")]
   kv["Key Vault"] --> eso
-  gha["deploy-azure (OIDC dx02v2-gha-deploy)"] -->|"App Configuration, ACR, kubectl apply -k"| aks
+  gha["deploy-azure (OIDC, workflow_dispatch)"] -->|"App Configuration, ACR, branch gitops/azure, Argo CD"| aks
 ```
 
 O namespace, a RBAC do deployer, o ClusterSecretStore, o ALB Controller, o Application Gateway for

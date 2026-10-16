@@ -6,5 +6,6 @@ kind: Kustomization
 namespace: dx02v2
 resources:
   - ../../base
+  - gitops-revision.yaml
 components:
   - ../../components/azure

@@ -69,7 +69,9 @@ REQUIRED_FILES=(
   scripts/install-tools.sh scripts/update-tool-checksums.sh scripts/harness.sh scripts/repo-guardrails.sh
   scripts/dev-env.sh scripts/compose-smoke.sh scripts/e2e-kind.sh scripts/deploy-azure.sh scripts/render-k8s.sh
   scripts/update-crd-schemas.sh scripts/crd-to-jsonschema.mjs scripts/check-manifests.mjs
+  scripts/publish-gitops.sh scripts/render-gitops-application.mjs scripts/check-gitops-renderer.mjs
   deploy/k8s/components/azure/params.example.env deploy/k8s/schemas/source.env
+  deploy/k8s/overlays/azure/gitops-revision.yaml deploy/k8s/overlays/azure-waf/gitops-revision.yaml
 )
 STABLE_CI_JOBS=(static test images e2e e2e-platform)
 
@@ -647,7 +649,7 @@ check_kubeconform() {
 
 # The contract (docs/CONTRATO.md): manifests and the deploy script use exactly the agreed names.
 check_contract_app() {
-  local dir="$HARNESS_WORK_DIR/k8s-contract" rc=0 key keys thumb deploy=scripts/deploy-azure.sh
+  local dir="$HARNESS_WORK_DIR/k8s-contract" rc=0 key keys thumb overlay example deploy=scripts/deploy-azure.sh
   need kubectl node
   [[ -d node_modules ]] || skip "node_modules is missing (check npm-ci)"
   render_overlays "$dir"
@@ -687,6 +689,28 @@ check_contract_app() {
   }
   if grep -nE 'get-credentials.*--admin|--overwrite-existing-tags|docker push .*:latest' "$deploy"; then
     echo "$deploy: no admin credentials, no tag overwrites"
+    rc=1
+  fi
+  example=deploy/k8s/components/azure/params.example.env
+  mkdir -p "$dir/gitops-patches"
+  for overlay in azure azure-waf; do
+    if node scripts/render-gitops-application.mjs azure "$overlay" "$example" "$example" \
+      >"$dir/gitops-patches/$overlay.json"; then
+      node scripts/check-gitops-renderer.mjs "$dir/gitops-patches/$overlay.json" "$dir/$overlay.yaml" || rc=1
+    else
+      rc=1
+    fi
+  done
+  if ! grep -qF "DEPLOY_MODE: \$"'{{ inputs.mode }}' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'default: gitops' .github/workflows/deploy-azure.yml; then
+    echo "deploy-azure must default to the GitOps branch publishing mode"
+    rc=1
+  fi
+  expected_push="git push --quiet origin \"HEAD:refs/heads/\$branch\""
+  if ! grep -qF "$expected_push" scripts/publish-gitops.sh ||
+    grep -q -- '--force' scripts/publish-gitops.sh; then
+    echo "publish-gitops.sh must push the cloud branch without force"
     rc=1
   fi
   summary "contract: ${#CONTRACT_APPCONFIG_KEYS[@]} App Configuration keys, ${#CONTRACT_PG_CA_THUMBPRINTS[@]} root CA thumbprints, manifests of ${K8S_OVERLAYS[*]}"
