@@ -56,11 +56,31 @@ const addPatch = (kind, name, path, value) => {
 
 addPatch('Gateway', 'dx02v2', '/metadata/annotations/alb.networking.azure.io~1alb-id', required(actual, 'AGC_ID'));
 addPatch('Gateway', 'dx02v2', '/spec/addresses/0/value', required(actual, 'AGC_FRONTEND'));
-addPatch('NetworkPolicy', 'web-ingress-from-agc', '/spec/ingress/0/from/0/ipBlock/cidr', required(actual, 'AGC_SUBNET_CIDR'));
-addPatch('NetworkPolicy', 'api-ingress-from-agc', '/spec/ingress/0/from/0/ipBlock/cidr', required(actual, 'AGC_SUBNET_CIDR'));
-addPatch('NetworkPolicy', 'api-egress-to-postgres-subnet', '/spec/egress/0/to/0/ipBlock/cidr', required(actual, 'POSTGRES_SUBNET_CIDR'));
+addPatch(
+  'NetworkPolicy',
+  'web-ingress-from-agc',
+  '/spec/ingress/0/from/0/ipBlock/cidr',
+  required(actual, 'AGC_SUBNET_CIDR'),
+);
+addPatch(
+  'NetworkPolicy',
+  'api-ingress-from-agc',
+  '/spec/ingress/0/from/0/ipBlock/cidr',
+  required(actual, 'AGC_SUBNET_CIDR'),
+);
+addPatch(
+  'NetworkPolicy',
+  'api-egress-to-postgres-subnet',
+  '/spec/egress/0/to/0/ipBlock/cidr',
+  required(actual, 'POSTGRES_SUBNET_CIDR'),
+);
 if (overlay === 'azure-waf') {
-  addPatch('WebApplicationFirewallPolicy', 'dx02v2', '/spec/webApplicationFirewall/id', required(actual, 'WAF_POLICY_ID'));
+  addPatch(
+    'WebApplicationFirewallPolicy',
+    'dx02v2',
+    '/spec/webApplicationFirewall/id',
+    required(actual, 'WAF_POLICY_ID'),
+  );
 }
 
 const document = {
@@ -68,10 +88,7 @@ const document = {
     source: {
       path: `deploy/k8s/overlays/${overlay}`,
       kustomize: {
-        images: [
-          `${apiExample.name}=${api.name}:${api.tag}`,
-          `${webExample.name}=${web.name}:${web.tag}`,
-        ],
+        images: [`${apiExample.name}=${api.name}:${api.tag}`, `${webExample.name}=${web.name}:${web.tag}`],
         patches,
       },
     },

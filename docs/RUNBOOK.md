@@ -115,10 +115,9 @@ cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/C
 
 ## 7. Deploy
 
-No Actions, abra `deploy-azure`, escolha a branch `main`, selecione `mode=gitops` (padrão) e aprove
-o environment `lab`. O modo GitOps exige o perfil `full` do tx02v2, a Application `dx02v2` no Argo
-CD e permissão para publicar `gitops/azure`. Use `mode=push` somente se o Argo CD não estiver
-gerenciando o app.
+No Actions, abra `deploy-azure`, escolha a branch `main` e aprove o environment `lab`. O workflow usa
+GitOps e exige o perfil `full` do tx02v2, a Application `dx02v2` no Argo CD e permissão para publicar
+`gitops/azure`. Se o cluster não usa Argo CD, execute o script de um laptop com `DEPLOY_MODE=push`.
 
 O job confere as variáveis, instala `kubectl`/`kubelogin`, autentica com `azure/login` e roda
 `scripts/deploy-azure.sh`, que:
@@ -126,7 +125,7 @@ O job confere as variáveis, instala `kubectl`/`kubelogin`, autentica com `azure
 1. lê as 15 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos e formatos;
 2. obtém kubeconfig temporário, confere API groups, a RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
 3. faz login no ACR, reaproveita tags existentes, constrói e publica as imagens `linux/amd64` que faltam;
-4. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas e renderiza/valida o overlay `azure-waf` ou `azure`. Em `mode=gitops`, configura os valores reais na Application, publica o commit do app com `params.env` de exemplo na branch `gitops/azure` e pede refresh ao Argo CD. Em `mode=push`, aplica o overlay com `kubectl apply -k`;
+4. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas e renderiza/valida o overlay `azure-waf` ou `azure`. No workflow, configura os valores reais na Application, publica o commit do app com `params.env` de exemplo na branch `gitops/azure` e pede refresh ao Argo CD. No uso local com `DEPLOY_MODE=push`, aplica o overlay com `kubectl apply -k`;
 5. no modo GitOps, espera a Application estar `Synced` e `Healthy` no commit publicado; depois espera ExternalSecrets e rollouts e confere as imagens SHA nos Deployments;
 6. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. Como o frontend só fala HTTP, o token de admin não é lido nem enviado.
 

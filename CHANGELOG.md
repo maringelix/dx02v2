@@ -9,7 +9,8 @@ All notable changes to this project are documented here. The format follows
 
 - Cloud deploy now publishes the app source revision to `gitops/azure` with example parameters, then
   waits for Argo CD to report that exact revision `Synced` and `Healthy`. Direct push remains
-  available when Argo CD is not managing the app.
+  available through the script when Argo CD is not managing the app; the Actions workflow always
+  uses GitOps.
 - Contract version 3 with tx02v2 records the R4 GitOps Application and the deployment path; all 15
   app configuration keys remain unchanged.
 

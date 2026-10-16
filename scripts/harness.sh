@@ -701,13 +701,15 @@ check_contract_app() {
       rc=1
     fi
   done
-  if ! grep -qF "DEPLOY_MODE: \$"'{{ inputs.mode }}' .github/workflows/deploy-azure.yml ||
+  expected_mode="DEPLOY_MODE=\"\${DEPLOY_MODE:-gitops}\""
+  if ! grep -qF 'DEPLOY_MODE: gitops' .github/workflows/deploy-azure.yml ||
     ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
-    ! grep -qF 'default: gitops' .github/workflows/deploy-azure.yml; then
+    grep -qE '^    inputs:' .github/workflows/deploy-azure.yml ||
+    ! grep -qF "$expected_mode" scripts/deploy-azure.sh; then
     echo "deploy-azure must default to the GitOps branch publishing mode"
     rc=1
   fi
-  expected_push="git push --quiet origin \"HEAD:refs/heads/\$branch\""
+  expected_push="git -C \"\$tmp/repo\" push --quiet origin \"HEAD:refs/heads/\$branch\""
   if ! grep -qF "$expected_push" scripts/publish-gitops.sh ||
     grep -q -- '--force' scripts/publish-gitops.sh; then
     echo "publish-gitops.sh must push the cloud branch without force"
