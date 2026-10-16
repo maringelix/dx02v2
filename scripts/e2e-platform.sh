@@ -775,11 +775,17 @@ main() {
   check_trivy
   check_hpa
   check_zero_downtime
-  # The platform starts on the previous main image for rollback coverage; exercise current headers
-  # only after the zero-downtime promotion installs this branch's image.
-  check_smoke
-  # The drill writes twice; the smoke test then uses up the write budget of the shared client address.
   check_failed_rollout_and_rollback
+  # The rollback drill proves that the previous release is restored. Re-promote the tested image
+  # before the smoke test so its security-header checks run against this branch's content.
+  GIT_SHA="$GIT_SHA" DEPLOY_IMAGES="dx02v2-api:e2e dx02v2-web:e2e" DEPLOY_ALLOW_DIRTY=1 \
+    bash "$REPO_ROOT/scripts/deploy-local.sh" >"$WORK_DIR/post-rollback-smoke.log" 2>&1 || {
+    cat "$WORK_DIR/post-rollback-smoke.log" >&2
+    die "rollback: could not re-promote the tested release for smoke validation"
+  }
+  [[ "$(api GET /api/info)" == *"$GIT_SHA"* ]] || die "rollback: the tested release was not restored for smoke validation"
+  # Keep the write-rate-limit exercise last: the smoke test consumes this client's write budget.
+  check_smoke
   check_self_heal
   check_chaos
   check_chaos_db_latency
