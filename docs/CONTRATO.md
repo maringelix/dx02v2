@@ -1,7 +1,8 @@
-# Contrato tx02v2 <-> dx02v2 — versão 2 (2026-10-14)
+# Contrato tx02v2 <-> dx02v2 — versão 3 (2026-10-16)
 
-Versão 2: o OpenTelemetry Collector da camada de plataforma do tx02v2 recebe os traces do app. A versão
-1 (2026-10-11) não tinha traces.
+Versão 3: a camada `full` do tx02v2 integra o app à malha ambient e ao Gatekeeper, usa GitOps com
+Argo CD e adiciona backup em Azure Blob com Workload ID. As 15 chaves da App Configuration não mudam.
+A versão 2 (2026-10-14) adicionou traces pelo OpenTelemetry Collector.
 
 Interface entre a infraestrutura (`tx02v2`) e a aplicação (este repositório), na parte que o app usa.
 A fonte da verdade é o
