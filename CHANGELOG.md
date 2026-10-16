@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 ### Added
 
+- R7 DevSecOps gates: CodeQL `security-extended` with SARIF policy, disposable SonarQube Quality
+  Gate with an uncovered-code negative fixture, Trivy filesystem and image scans, Gitleaks history
+  scan with a negative fixture, and OWASP ZAP Baseline against the disposable Compose app. Reports
+  remain available as CI artifacts; findings fail their gate.
+- A digest-locked release path that reuses the exact image IDs built and tested by CI, publishes them
+  to GHCR with SPDX SBOMs and Sigstore provenance/SBOM attestations, and verifies the CI run, SBOM
+  hashes and signer identity before a protected Azure deploy can start.
 - Cloud deploy now publishes the app source revision to `gitops/azure` with example parameters, then
   waits for Argo CD to report that exact revision `Synced` and `Healthy`. Direct push remains
   available through the script when Argo CD is not managing the app; the Actions workflow always
@@ -47,6 +54,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Azure deploy promotes the signed GHCR image digests into ACR without rebuilding, refuses to
+  replace a SHA tag with different content, and pins the Kubernetes workloads and GitOps revision
+  ConfigMap to the approved image digests.
 - `deploy/local/tx02v2.ref` follows tx02v2 to `c92def2` (tx02v2#10, the debts round of the roadmap).
 - Comments, script messages and docs say "the contract" or point to `docs/CONTRATO.md` instead of
   "contract v1": the contract has been at version 2 since round 1 (roadmap S.8); the README says that HTTPS on the gateway listener is outside contract v2.

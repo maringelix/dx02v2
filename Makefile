@@ -7,7 +7,7 @@ HARNESS := bash scripts/harness.sh
 # The directory of this Makefile: `clean` removes things under it, wherever make was started from.
 ROOT := $(patsubst %/,%,$(dir $(abspath $(firstword $(MAKEFILE_LIST)))))
 
-.PHONY: help tools static test verify build e2e e2e-platform e2e-platform-small all clean
+.PHONY: help tools static test verify build e2e e2e-platform e2e-platform-small dast all clean
 
 help: ## Show the available targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z][a-z0-9-]*:.*## / { printf "  %-8s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -15,16 +15,16 @@ help: ## Show the available targets
 tools: ## Install the pinned harness tools into .tools/ (SHA256-verified)
 	@bash scripts/install-tools.sh
 
-static: ## Policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, CRD schemas, kubeconform, contract, trivy config, gitleaks
+static: ## Policies, npm ci, eslint, prettier, tsc, hadolint, actionlint, shellcheck, kubeconform, contract, Trivy config/dependencies, gitleaks and its negative gate
 	@$(HARNESS) static
 
-test: ## API unit + integration tests (real PostgreSQL 17) and web tests, with coverage gates
+test: ## CodeQL SARIF gate, API + web tests (real PostgreSQL 17) and coverage gates
 	@$(HARNESS) test
 
 verify: ## static + test (what the CI jobs static and test run)
 	@$(HARNESS) static test
 
-build: ## npm build, both images, image policy, trivy image gate (HIGH/CRITICAL, fixable)
+build: ## npm build, both images, image policy and Trivy image gate (HIGH/CRITICAL, fixable)
 	@$(HARNESS) build
 
 e2e: ## kind cluster dx02v2-e2e: deploy, smoke test, NetworkPolicy probes (needs Docker)
@@ -35,6 +35,9 @@ e2e-platform: ## The app on the full tx02v2 local platform: deploy through Argo 
 
 e2e-platform-small: ## The same e2e on the small platform size inside Docker limited to 7 GB (heavy: CI only)
 	@$(HARNESS) platform-small
+
+dast: ## OWASP ZAP Baseline against a disposable Compose app (Docker + network; CI preferred)
+	@$(HARNESS) dast
 
 all: ## Every stage: static + test + build + e2e
 	@$(HARNESS) all

@@ -115,23 +115,33 @@ cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/C
 
 ## 7. Deploy
 
-No Actions, abra `deploy-azure`, escolha a branch `main` e aprove o environment `lab`. O workflow usa
-GitOps e exige o perfil `full` do tx02v2, a Application `dx02v2` no Argo CD e permissão para publicar
-`gitops/azure`. Se o cluster não usa Argo CD, execute o script de um laptop com `DEPLOY_MODE=push`.
+Primeiro, publique um release a partir de `main`: abra `publish-images`, informe o ID de uma execução
+bem-sucedida do `ci.yml` para o mesmo SHA de `main`, e aguarde a publicação dos digests assinados.
+Depois, abra `deploy-azure`, escolha `main` e informe o ID da execução `publish-images`. O workflow
+valida o CI de origem, os SBOMs e as attestations antes de solicitar aprovação do environment `lab`;
+após a aprovação, valida tudo novamente antes de pedir credenciais Azure. O deploy usa GitOps e exige
+o perfil `full` do tx02v2, a Application `dx02v2` no Argo CD e permissão para publicar `gitops/azure`.
+O deploy por import exige `Container Registry Data Importer and Data Reader` no ACR; essa permissão
+least-privilege será entregue junto ao contrato no PR R8 do tx02v2. A homologação cloud ocorre depois
+da integração dos 22 PRs.
 
-O job confere as variáveis, instala `kubectl`/`kubelogin`, autentica com `azure/login` e roda
-`scripts/deploy-azure.sh`, que:
+O script `scripts/deploy-azure.sh`:
 
-1. lê as 15 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos e formatos;
-2. obtém kubeconfig temporário, confere API groups, a RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
-3. faz login no ACR, reaproveita tags existentes, constrói e publica as imagens `linux/amd64` que faltam;
-4. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas e renderiza/valida o overlay `azure-waf` ou `azure`. No workflow, configura os valores reais na Application, publica o commit do app com `params.env` de exemplo na branch `gitops/azure` e pede refresh ao Argo CD. No uso local com `DEPLOY_MODE=push`, aplica o overlay com `kubectl apply -k`;
-5. no modo GitOps, espera a Application estar `Synced` e `Healthy` no commit publicado; depois espera ExternalSecrets e rollouts e confere as imagens SHA nos Deployments;
-6. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. Como o frontend só fala HTTP, o token de admin não é lido nem enviado.
+1. valida a execução de publicação, o CI de origem, os cinco checks obrigatórios, os hashes dos SBOMs e as attestations de provenance e SPDX;
+2. lê as 15 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos e formatos;
+3. obtém kubeconfig temporário e confere API groups e RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
+4. importa os digests assinados do GHCR para o ACR sem reconstruir as imagens; confere que os digests e image IDs permanecem iguais e recusa substituir uma tag SHA por conteúdo diferente;
+5. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas, renderiza e valida o overlay `azure-waf` ou `azure`, configura os valores reais na Application e publica o commit com `params.env` de exemplo em `gitops/azure` (ou aplica com `DEPLOY_MODE=push`);
+6. espera a Application estar `Synced` e `Healthy` no commit publicado, os ExternalSecrets e rollouts, e confere os digests nos Deployments;
+7. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. Como o frontend só fala HTTP, o token de admin não é lido nem enviado.
 
-De um laptop, faça `az login`, selecione a assinatura do lab e configure a autenticação Git para publicar a branch:
+Para executar manualmente de um laptop, obtenha e extraia o artefato do release e configure
+`RELEASE_DIR`, `RELEASE_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_ACTOR` e um `GH_TOKEN` com permissões
+`actions:read`, `attestations:read` e `packages:read`. Autentique o Docker no GHCR e o Git para publicar
+`gitops/azure`; depois faça `az login`, selecione a assinatura do lab e rode:
 
     make tools
+    printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
     AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
 
 Sem Argo CD, use `DEPLOY_MODE=push AZURE_APPCONFIG_ENDPOINT=... scripts/deploy-azure.sh`.

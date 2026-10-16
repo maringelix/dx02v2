@@ -22,6 +22,8 @@ Ele vive em `scripts/harness.sh`; o `Makefile` e o CI só o chamam. O que passa 
 | Testes da página | `test:web` | lista, envio com sucesso e erro, validação, modo admin (fetch simulado), cobertura >= 70 % linhas | navegador real, CSP aplicada pelo navegador | local, CI |
 | Build | `npm-build`, `image:*`, `image-policy:*` | `tsc` e `vite build`; as duas imagens; usuário numérico não root, labels OCI, sem npm/npx/corepack nem shell no runtime da API, nenhum sourcemap no web | comportamento em runtime (ver e2e) | local, CI (Docker) |
 | Vulnerabilidades das imagens | `trivy-image:*` | nenhuma HIGH/CRITICAL com correção disponível | CVEs sem correção, zero-days | local, CI (Docker, rede) |
+| DevSecOps | CodeQL, SonarQube, `trivy fs`, Gitleaks, OWASP ZAP | SARIF de CodeQL sem findings críticos, Quality Gate Sonar com teste negativo, scan de filesystem e imagens, detecção de segredo no histórico e baseline DAST contra Compose descartável | vulnerabilidades fora das regras dos scanners, comportamento em cloud | CI (`static`, `test`, `images`); `make dast` |
+| Release e attestations | `publish-images`, `verify-release-bundle.sh` | publica os mesmos image IDs validados no CI; confere SBOM SPDX, provenance e identidade do signer; o deploy Azure fixa os workloads pelos digests promovidos | execução do deploy e comportamento no AKS | workflows manuais; release ainda não publicado |
 | Ponta a ponta | `kind-e2e` (`scripts/e2e-kind.sh`) | cluster kind 1.36: rollouts com initContainer de migração, Pod Security `restricted` imposto, smoke test pelo nginx (cabeçalhos, API, 201/400/401/204/404/413/429, XFF falso, request ID) e sondas de NetworkPolicy (permitido/bloqueado) | AKS, Application Gateway for Containers, WAF, ESO, Key Vault, PostgreSQL Flexible Server, Cilium | local, CI (Docker) |
 | Nuvem | workflow deploy-azure e `contract-app` | render dos overlays e dos patches da Application validados localmente; sync real continua sem execução | Azure e smoke na nuvem | `não executado em nuvem (v2)` |
 
@@ -36,8 +38,8 @@ de um proxy que imita o AGC): é uma verificação local, não um check do harne
 | Job (`ci.yml`) | Alvo | Estágio do harness |
 |---|---|---|
 | `static` | `make tools && make static` | `static` |
-| `test` | `make test` (service `postgres:17-alpine` por digest, `DB_*` no ambiente) | `test` |
-| `images` | build com buildx + cache do GitHub Actions, depois `make tools && make build` com `IMAGES_PREBUILT=1`; as duas imagens viram um artefato | `build` |
+| `test` | CodeQL `security-extended`, `make test` contra PostgreSQL 17 descartável, SonarQube com Quality Gate real e fixture negativa; SARIF como artefato | `test` |
+| `images` | build com buildx + cache do GitHub Actions, `make tools && make build`, ZAP Baseline contra Compose descartável; as duas imagens viram um artefato | `build` + `dast` |
 | `e2e` | carrega o artefato, `bash scripts/install-tools.sh kind kubectl`, `make e2e` com `E2E_SKIP_BUILD=1`; diagnósticos como artefato em caso de falha | `e2e` |
 | `e2e-platform` | carrega o artefato, `make e2e-platform` com `E2E_SKIP_BUILD=1`: clona o tx02v2 no commit de `deploy/local/tx02v2.ref`, sobe o lab local completo, faz o deploy GitOps e roda as sondas (`docs/LAB_LOCAL.md`); diagnósticos como artefato | `platform` |
 | `e2e-platform-small` | carrega o artefato, `make e2e-platform-small` com `E2E_SKIP_BUILD=1`: o mesmo e2e com `LOCAL_SIZE=small` dentro de um Docker-in-Docker limitado a 7 GB, sem swap; picos de memória e OOM kills no resumo do job; diagnósticos como artefato. Não é check exigido | `platform-small` |
