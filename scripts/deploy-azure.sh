@@ -455,6 +455,7 @@ write_params() {
   local params="$WORK_DIR/params.env"
   {
     echo "API_IMAGE=$API_IMAGE"
+    echo "MESH_IMAGE=$API_IMAGE"
     echo "WEB_IMAGE=$WEB_IMAGE"
     echo "AGC_ID=$(param agc/id)"
     echo "AGC_FRONTEND=$(param agc/frontend-name)"

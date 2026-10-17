@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
+### Fixed
+
+- The platform rollback exercise keeps its mesh demo on the tested R8 API image while the previous
+  application artifact is deployed. Strict manifest validation now uses the SHA256-pinned experimental
+  Gateway API 1.6.3 schema for the full profile's bounded retries and the ALB Controller schemas for
+  the core ingress path.
+
 ### Added
 
 - Contract v4 with public HTTPS in the Azure full overlay: a cert-manager certificate issued by

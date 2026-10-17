@@ -683,16 +683,32 @@ check_shellcheck() {
 }
 
 check_kubeconform() {
-  local dir="$HARNESS_WORK_DIR/k8s-kubeconform" overlay
-  need kubectl kubeconform
+  local dir="$HARNESS_WORK_DIR/k8s-kubeconform" overlay version expected asset experimental_schemas
+  local -a schema_locations=()
+  need kubectl kubeconform curl node
   render_overlays "$dir"
+  version="$(env_file_value "$K8S_SCHEMA_DIR/source.env" GATEWAY_CRDS_VERSION)"
+  expected="$(env_file_value "$K8S_SCHEMA_DIR/source.env" GATEWAY_CRDS_EXPERIMENTAL_SHA256)"
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ && "$expected" =~ ^[0-9a-f]{64}$ ]] ||
+    die "the experimental Gateway API schema source is not pinned"
+  asset="$dir/gateway-api-experimental.yaml"
+  experimental_schemas="$dir/experimental-schemas"
+  download "https://github.com/kubernetes-sigs/gateway-api/releases/download/$version/experimental-install.yaml" "$asset"
+  [[ "$(sha256_of "$asset")" == "$expected" ]] ||
+    die "Gateway API experimental CRD digest differs from deploy/k8s/schemas/source.env"
+  node scripts/crd-to-jsonschema.mjs "$experimental_schemas" "$asset" >/dev/null
   mkdir -p "$HARNESS_WORK_DIR/kubeconform-cache"
   for overlay in "${K8S_OVERLAYS[@]}"; do
     echo "== $overlay"
+    schema_locations=()
+    if [[ "$overlay" == *-full || "$overlay" == local-platform ]]; then
+      schema_locations+=(-schema-location "$experimental_schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
+    fi
     kubeconform -strict -summary -output text \
       -kubernetes-version "$K8S_SCHEMA_KUBERNETES_VERSION" \
       -cache "$HARNESS_WORK_DIR/kubeconform-cache" \
       -schema-location "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/$K8S_SCHEMA_REF/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json" \
+      "${schema_locations[@]}" \
       -schema-location "$K8S_SCHEMA_DIR/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
       -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/$CRD_SCHEMA_REF/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
       "$dir/$overlay.yaml" | tee "$dir/$overlay.summary"
@@ -783,10 +799,10 @@ NODE
   fi
   expected_mode="DEPLOY_MODE=\"\${DEPLOY_MODE:-auto}\""
   if ! grep -qF 'default: auto' .github/workflows/deploy-azure.yml ||
-    ! grep -qF 'DEPLOY_MODE: ${{ inputs.deploy_mode }}' .github/workflows/deploy-azure.yml ||
-    ! grep -qF 'PLATFORM_PROFILE: ${{ inputs.platform_profile }}' .github/workflows/deploy-azure.yml ||
+    ! grep -qF "DEPLOY_MODE: \${{ inputs.deploy_mode }}" .github/workflows/deploy-azure.yml ||
+    ! grep -qF "PLATFORM_PROFILE: \${{ inputs.platform_profile }}" .github/workflows/deploy-azure.yml ||
     ! grep -qF 'attestations: write' .github/workflows/deploy-azure.yml ||
-    ! grep -qF 'PLATFORM_PROFILE="${PLATFORM_PROFILE:-core}"' scripts/deploy-azure.sh ||
+    ! grep -qF "PLATFORM_PROFILE=\"\${PLATFORM_PROFILE:-core}\"" scripts/deploy-azure.sh ||
     ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
     ! grep -qF "$expected_mode" scripts/deploy-azure.sh ||
     grep -qF 'docker build' scripts/deploy-azure.sh ||
@@ -795,7 +811,7 @@ NODE
     grep -qF 'az acr import' scripts/deploy-azure.sh ||
     grep -qF 'az acr repository list' scripts/deploy-azure.sh ||
     grep -qF 'az acr repository show-tags' scripts/deploy-azure.sh ||
-    ! grep -qF 'docker push "$target_tag"' scripts/deploy-azure.sh ||
+    ! grep -qF "docker push \"\$target_tag\"" scripts/deploy-azure.sh ||
     ! grep -qF 'actions/attest@' .github/workflows/deploy-azure.yml; then
     echo "deploy-azure must verify, push only to repository-scoped ACR repos, attest target digests, and publish GitOps"
     rc=1

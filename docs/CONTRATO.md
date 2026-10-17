@@ -4,6 +4,10 @@ Versão 4: duas chaves de DNS/ACME, certificado público no perfil full, HTTPS n
 Versão 3: malha ambient, Gatekeeper, GitOps e backup Azure Blob. A versão 2 adicionou traces pelo
 OpenTelemetry Collector.
 
+Os overlays `full` e `local-platform` usam o bundle experimental Gateway API v1.6.3 do tx02v2
+para o `retry` do waypoint. O schema do ALB Controller continua sendo usado para a entrada AGC
+dos overlays `core`.
+
 Interface entre a infraestrutura (`tx02v2`) e a aplicação (este repositório), na parte que o app usa.
 A fonte da verdade é o
 [`docs/CONTRATO.md` do tx02v2](https://github.com/maringelix/tx02v2/blob/main/docs/CONTRATO.md):
