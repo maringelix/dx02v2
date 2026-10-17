@@ -373,7 +373,8 @@ connect_cluster() {
 promote_image() {
   local component="$1" source_name="$2" source_digest="$3" expected_id="$4"
   local source_ref="$source_name@$source_digest" image_tag="dx02v2/$component:$GIT_SHA"
-  local target_tag="$(param acr/login-server)/$image_tag" target_digest="" target_ref target_id source_id show_error
+  local target_tag target_digest="" target_ref target_id source_id show_error
+  target_tag="$(param acr/login-server)/$image_tag"
   docker pull "$source_ref" >/dev/null || die "cannot pull verified $component source digest $source_ref"
   source_id="$(docker image inspect "$source_ref" --format '{{.Id}}')"
   [[ "$source_id" == "$expected_id" ]] ||
