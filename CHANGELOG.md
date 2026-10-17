@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- R9: select the regional contract, AKS, ACR, secret references and independent GitOps branch;
+  verify recovered HTTPS, source revision and writes before DNS cutover.
+
 ### Added
 
 - R9 independent Docker A/B recovery gate: verified backup/configuration, PostgreSQL TLS,

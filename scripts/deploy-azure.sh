@@ -53,6 +53,9 @@ CONTRACT_SECRET_STORE=azure-key-vault
 APPCONFIG_ENDPOINT_PATTERN='^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$'
 ACR_PATTERN='^tx02v2lab[0-9a-f]{8}\.azurecr\.io$'
 KEYVAULT_PATTERN='^https://tx02v2-lab-[0-9a-f]{8}\.vault\.azure\.net/?$'
+# shellcheck source=scripts/lib/region-target.sh
+source "$REPO_ROOT/scripts/lib/region-target.sh"
+select_region_target "${LAB_TARGET:-primary}"
 CIDR_PATTERN='^([0-9]{1,3}\.){3}[0-9]{1,3}/([89]|1[0-9]|2[0-9])$'
 # Contract: root CAs for Azure Database for PostgreSQL (SHA-1 thumbprint, DER download URL), from
 # learn.microsoft.com/azure/security/fundamentals/azure-ca-details. A download whose thumbprint
@@ -461,6 +464,8 @@ write_params() {
     echo "AGC_ID=$(param agc/id)"
     echo "AGC_FRONTEND=$(param agc/frontend-name)"
     echo "DNS_HOSTNAME=$DNS_HOSTNAME"
+    echo "DB_SECRET_NAME=$CONTRACT_DB_SECRET"
+    echo "ADMIN_TOKEN_SECRET_NAME=$CONTRACT_ADMIN_TOKEN_SECRET"
     echo "WAF_POLICY_ID=$(param waf/policy-id)"
     echo "AGC_SUBNET_CIDR=$(param agc-subnet-cidr)"
     echo "POSTGRES_SUBNET_CIDR=$(param postgres-subnet-cidr)"
@@ -579,6 +584,14 @@ wait_for_gateway() {
 }
 
 smoke() {
+  if [[ "$LAB_TARGET" == secondary && "$PLATFORM_PROFILE" == full ]]; then
+    local selected_address="$GATEWAY_ADDRESS"
+    if [[ ! "$selected_address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      selected_address="$(getent ahostsv4 "$selected_address" | awk 'NR == 1 { print $1 }')"
+    fi
+    bash "$REPO_ROOT/scripts/regional-smoke.sh" "$DNS_HOSTNAME" "$selected_address" "$GIT_SHA" | tee "$WORK_DIR/smoke.txt"
+    return
+  fi
   local status=0
   if [[ "$PLATFORM_PROFILE" == full ]]; then
     BASE="https://$DNS_HOSTNAME"

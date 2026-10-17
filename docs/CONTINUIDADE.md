@@ -55,3 +55,20 @@ Se a origem não puder ser isolada, pare a promoção e escale ao operador.
 Não copie o arquivo `.env` local para cloud. Segredos regionais ficam no Secret
 Manager e workload identities da região. A promoção publica os digests já
 assinados no registry da região recuperada; não deve reconstruir o código.
+## Destino regional do deploy
+
+O workflow `deploy-azure` oferece `target=primary|secondary`. O secundário lê
+`AZURE_DR_APPCONFIG_ENDPOINT` (output do TX), usa o AKS/ACR/Key Vault da região
+DR e publica `gitops/azure-dr`. As referências dos ExternalSecrets são renderizadas
+para os segredos DR, mantendo o resource group e as identidades previstas no contrato.
+
+Antes de mover o CNAME, faça fencing dos escritores primários, confira lag/último
+backup e promova a réplica com autorização humana. No AKS secundário, restaure o
+Secret TLS marcado `lab.continuity/tls=true` do backup conforme o runbook do TX.
+O smoke do perfil full acessa o endereço do Gateway escolhido com `curl --resolve`,
+preservando SNI e verificação do certificado; exige a revisão publicada e escrita/
+leitura pelo app. Ele não usa o DNS antigo para aprovar o standby.
+
+O CI verifica os dois destinos e as referências de segredos offline. A continuidade
+real A/B usa Docker no Actions; promoção gerenciada e emissão/renovação ACME não
+foram executadas na Azure nesta versão.

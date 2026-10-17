@@ -24,6 +24,11 @@ esac
 
 : "${REPO_ROOT:?source scripts/lib/common.sh before calling this script}"
 branch="gitops/$cloud"
+case "${LAB_TARGET:-primary}" in
+  primary) ;;
+  secondary) branch="$branch-dr" ;;
+  *) echo "invalid LAB_TARGET" >&2; exit 2 ;;
+esac
 component="$REPO_ROOT/deploy/k8s/components/$cloud"
 overlay_dir="deploy/k8s/overlays/$overlay"
 app_name="$(basename "$REPO_ROOT")"

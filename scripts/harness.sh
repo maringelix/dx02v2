@@ -1137,6 +1137,8 @@ register_checks() {
   register static promotion-statements check_promotion_statements
   register static trivyignore-policy check_trivyignore_policy
   register static npm-ci check_npm_ci
+  register static region-target 'bash scripts/tests/region-target.sh'
+  register static regional-smoke 'bash scripts/tests/regional-smoke.sh'
   register static eslint check_eslint
   register static prettier check_prettier
   register static typecheck:api "check_typecheck api"

@@ -102,9 +102,16 @@ if (overlay === 'azure-waf' || overlay === 'azure-waf-full') {
   );
 }
 
+for (let index = 0; index < 5; index += 1) {
+  addPatch('ExternalSecret', 'db-credentials', `/spec/data/${index}/remoteRef/key`, required(actual, 'DB_SECRET_NAME'));
+}
+addPatch('ExternalSecret', 'app-secrets', '/spec/data/0/remoteRef/key', required(actual, 'ADMIN_TOKEN_SECRET_NAME'));
+const target = process.env.LAB_TARGET || 'primary';
+if (!['primary', 'secondary'].includes(target)) fail('invalid LAB_TARGET');
 const document = {
   spec: {
     source: {
+      targetRevision: target === 'secondary' ? 'gitops/azure-dr' : 'gitops/azure',
       path: `deploy/k8s/overlays/${overlay}`,
       kustomize: {
         images: [`${apiExample.name}=${api.reference}`, `${webExample.name}=${web.reference}`],
