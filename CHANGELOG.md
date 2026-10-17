@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 ### Fixed
 
+- Permit the generated Istio waypoint to accept HBONE under namespace default-deny, with egress
+  limited to the app, mesh demo, control plane and telemetry. L7 identity/HTTP policies still apply.
+
 - The platform rollback exercise keeps its mesh demo on the tested R8 API image while the previous
   application artifact is deployed. Strict manifest validation now uses the SHA256-pinned experimental
   Gateway API 1.6.3 schema for the full profile's bounded retries and the ALB Controller schemas for
