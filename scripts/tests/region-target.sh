@@ -13,7 +13,7 @@ select_region_target secondary
 if (select_region_target unrelated) >/dev/null 2>&1; then die 'arbitrary target accepted'; fi
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
-sed -e 's/tx02v2lab0a1b2c3d\.azurecr/tx02v2lab0a1b2c3ddr.azurecr/g' \
+sed -e 's/tx02v2lab00000000\.azurecr/tx02v2lab00000000dr.azurecr/g' \
   -e 's/tx02v2-lab-db-app/tx02v2-lab-dr-db-app/g' \
   -e 's/tx02v2-lab-app-admin-token/tx02v2-lab-dr-app-admin-token/g' \
   "$K8S_PARAMS_EXAMPLE" >"$work/dr.env"
@@ -23,6 +23,10 @@ node --input-type=module - "$work/dr.yaml" <<'JS'
 import fs from 'node:fs';
 import YAML from 'yaml';
 const docs = YAML.parseAllDocuments(fs.readFileSync(process.argv[2], 'utf8')).map((d) => d.toJSON());
+const api = docs.find((d) => d?.kind === 'Deployment' && d.metadata.name === 'api');
+if (!api.spec.template.spec.containers[0].image.startsWith('tx02v2lab00000000dr.azurecr.io/')) {
+  throw new Error('primary registry leaked into the standby render');
+}
 for (const doc of docs.filter((d) => d?.kind === 'ExternalSecret')) {
   if (doc.spec.data.some((entry) => !entry.remoteRef.key.startsWith('tx02v2-lab-dr-'))) {
     throw new Error('primary secret leaked into the standby render');
