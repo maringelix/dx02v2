@@ -6,6 +6,11 @@ name: deploy-azure
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: Lab runtime after approved fencing/promotion
+        type: choice
+        options: [primary, secondary]
+        default: primary
       release_run_id:
         description: Successful publish-images workflow run id for the release to deploy
         required: true
@@ -98,7 +103,8 @@ jobs:
       id-token: write
       packages: read
     env:
-      AZURE_APPCONFIG_ENDPOINT: ${{ vars.AZURE_APPCONFIG_ENDPOINT }}
+      LAB_TARGET: ${{ inputs.target }}
+      AZURE_APPCONFIG_ENDPOINT: ${{ inputs.target == 'secondary' && vars.AZURE_DR_APPCONFIG_ENDPOINT || vars.AZURE_APPCONFIG_ENDPOINT }}
       DEPLOY_MODE: ${{ inputs.deploy_mode }}
       PLATFORM_PROFILE: ${{ inputs.platform_profile }}
       GH_TOKEN: ${{ github.token }}
@@ -136,9 +142,11 @@ jobs:
               problems+=("$v is not a lowercase GUID")
             fi
           done
+          endpoint_pattern='^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$'
+          [[ "$LAB_TARGET" != secondary ]] || endpoint_pattern='^https://tx02v2-lab-[0-9a-f]{8}-dr\.azconfig\.io/?$'
           if [[ -z "$AZURE_APPCONFIG_ENDPOINT" ]]; then
             problems+=("AZURE_APPCONFIG_ENDPOINT is not set")
-          elif [[ ! "$AZURE_APPCONFIG_ENDPOINT" =~ ^https://tx02v2-lab-[0-9a-f]{8}\.azconfig\.io/?$ ]]; then
+          elif [[ ! "$AZURE_APPCONFIG_ENDPOINT" =~ $endpoint_pattern ]]; then
             problems+=("AZURE_APPCONFIG_ENDPOINT is not https://tx02v2-lab-<suffix>.azconfig.io")
           fi
           if ((${#problems[@]} > 0)); then

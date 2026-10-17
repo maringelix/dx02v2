@@ -1090,6 +1090,12 @@ check_platform_small_e2e() {
   bash scripts/e2e-platform-small.sh
 }
 
+check_continuity() {
+  need docker curl jq openssl sha256sum tar date
+  need_docker
+  bash scripts/continuity-drill.sh
+}
+
 # The alert rules of the local-platform component, tested with promtool (series the API exports and
 # kube-state-metrics; docs/HARNESS.md).
 check_promtool_rules() {
@@ -1131,6 +1137,8 @@ register_checks() {
   register static promotion-statements check_promotion_statements
   register static trivyignore-policy check_trivyignore_policy
   register static npm-ci check_npm_ci
+  register static region-target 'bash scripts/tests/region-target.sh'
+  register static regional-smoke 'bash scripts/tests/regional-smoke.sh'
   register static eslint check_eslint
   register static prettier check_prettier
   register static typecheck:api "check_typecheck api"
@@ -1162,6 +1170,7 @@ register_checks() {
   register dast zap-baseline check_dast_zap
   register platform platform-e2e check_platform_e2e
   register platform-small platform-small-e2e check_platform_small_e2e
+  register continuity continuity-drill check_continuity
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -1250,7 +1259,7 @@ main() {
   register_checks
   for arg in "$@"; do
     case "$arg" in
-      static | test | build | e2e | dast | platform | platform-small) stages+=("$arg") ;;
+      static | test | build | e2e | dast | platform | platform-small | continuity) stages+=("$arg") ;;
       all) stages+=(static test build e2e) ;;
       list)
         list_checks

@@ -1,4 +1,10 @@
-# Contrato tx02v2 <-> dx02v2 — versão 4 (2026-10-17)
+# Contrato tx02v2 <-> dx02v2 — versão 5 (2026-10-17)
+
+R9 mantém os 17 campos e acrescenta o destino secundário em outra região.
+`target=secondary` seleciona o App Configuration DR, AKS/ACR/Key Vault DR e
+`gitops/azure-dr`; resource group e principais de deploy permanecem os do lab.
+Os nomes dos segredos regionais passam pelos parâmetros de render, com validação
+de ambos os destinos. O smoke verifica o Gateway escolhido antes da troca do CNAME.
 
 Versão 4: duas chaves de DNS/ACME, certificado público no perfil full, HTTPS no AGC e redirect HTTP.
 Versão 3: malha ambient, Gatekeeper, GitOps e backup Azure Blob. A versão 2 adicionou traces pelo
