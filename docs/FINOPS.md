@@ -51,7 +51,7 @@ de produção automaticamente. VPA Off não compete com HPA sobre requests.
 
 AKS tem autoscaler no pool regular e pool Spot tainted opcional; a aula tx02v2 usa
 tarefa descartável com deadline/fallback on-demand explícito, preservando o app
-crítico. Aumentar réplicas no kind não comprova escala gerenciada ou preço de GCP.
+crítico. Aumentar réplicas no kind não comprova escala gerenciada ou preço da Azure.
 Use o gate de estimativa, budget e expiração do tx02v2 antes de qualquer apply;
 não trate OpenCost como fatura nem budget como teto de cobrança.
 
