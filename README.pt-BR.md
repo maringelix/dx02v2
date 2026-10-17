@@ -170,3 +170,7 @@ Vulnerabilidades: [SECURITY.md](SECURITY.md).
 ## Licença
 
 [MIT](LICENSE) — Copyright (c) 2025-2026 Bruno Maringeli.
+
+## R10: capacidade e FinOps
+
+Veja [Capacidade e SLO](docs/FINOPS.md) para carga limitada, HPA up/down, PDB/drain, rightsizing, pool PostgreSQL e showback. Prova Docker em Actions; nada executado na nuvem (v2).

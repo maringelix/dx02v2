@@ -143,3 +143,7 @@ aparece com `npm run test:coverage` à mão). `make clean` remove tudo isso.
 | `FAIL kind-e2e` | rollout, smoke ou sonda falhou | leia o resumo e os diagnósticos (`E2E_DIAGNOSTICS_DIR`, artefato `e2e-diagnostics` no CI); `KEEP_CLUSTER=1 make e2e` para investigar |
 | `FAIL gitleaks` | segredo ou falso positivo | remova o segredo e gire a credencial; placeholders devem ter cara de placeholder (por exemplo SHA ou GUID só com zeros). Antes do primeiro commit o check examina os arquivos visíveis ao git |
 | `FAIL policy-identifiers` | GUID, sufixo, ID de conta, e-mail ou IP real | use `00000000-0000-0000-0000-000000000000`, `tx02v2lab00000000`, `you@example.com`, `203.0.113.10/32` |
+
+## R10: capacidade e FinOps
+
+Veja [Capacidade e SLO](FINOPS.md) para carga limitada, HPA up/down, PDB/drain, rightsizing, pool PostgreSQL e showback. Prova Docker em Actions; nada executado na nuvem (v2).

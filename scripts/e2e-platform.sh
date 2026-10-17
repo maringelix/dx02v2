@@ -898,6 +898,10 @@ main() {
   check_self_heal
   check_chaos
   check_chaos_db_latency
+  if [[ "${LOCAL_FINOPS:-0}" == 1 ]]; then
+    bash "$REPO_ROOT/scripts/capacity-app.sh"
+    pass "capacity and FinOps: HPA up/down, drain, rightsizing SLO and database saturation"
+  fi
   printf 'SUMMARY: dx02v2 on the tx02v2 local platform: %d probes passed\n' "$PASSED"
 }
 

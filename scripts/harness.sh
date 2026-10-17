@@ -1138,6 +1138,7 @@ register_checks() {
   register static trivyignore-policy check_trivyignore_policy
   register static npm-ci check_npm_ci
   register static region-target 'bash scripts/tests/region-target.sh'
+  register static capacity-client 'node --test e2e/capacity.test.mjs'
   register static regional-smoke 'bash scripts/tests/regional-smoke.sh'
   register static eslint check_eslint
   register static prettier check_prettier
