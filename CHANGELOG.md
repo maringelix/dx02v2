@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 ### Fixed
 
+- The Azure platform exercise uses the merged local waypoint setup and now runs the same advanced
+  mesh probe as AWS and Google Cloud: identity restrictions, weighted traffic, timeout and bounded
+  retry behavior are exercised through the programmed waypoint.
+
 - Permit the generated Istio waypoint to accept HBONE under namespace default-deny, with egress
   limited to the app, mesh demo, control plane and telemetry. L7 identity/HTTP policies still apply.
 

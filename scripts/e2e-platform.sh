@@ -290,6 +290,99 @@ check_mesh() {
   pass "mesh: plaintext client outside the mesh -> api:3000 refused (STRICT mTLS + NetworkPolicy)"
 }
 
+run_mesh_probe() {
+  local job=$1 service_account=$2 mode=$3 app_label=$4 image
+  image="$(kubectl -n "$NAMESPACE" get deployment mesh-stable -o jsonpath='{.spec.template.spec.containers[?(@.name=="main")].image}')"
+  [[ "$image" =~ ^[^[:space:]]+(@sha256:[0-9a-f]{64}|:[A-Za-z0-9._-]+)$ ]] ||
+    die "mesh: the probe image is not the API image selected by GitOps"
+  kubectl -n "$NAMESPACE" delete job "$job" --ignore-not-found=true --wait=true >/dev/null
+  kubectl -n "$NAMESPACE" apply -f - >/dev/null <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $job
+spec:
+  activeDeadlineSeconds: 120
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: $app_label
+    spec:
+      serviceAccountName: $service_account
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: probe
+          image: "$image"
+          imagePullPolicy: IfNotPresent
+          args: ["dist/mesh-probe.js"]
+          env:
+            - name: MESH_PROBE_MODE
+              value: "$mode"
+            - name: MESH_PROBE_TARGET
+              value: http://mesh-demo:3000
+          # Gatekeeper requires readiness on every container, including this one-shot client.
+          readinessProbe:
+            exec:
+              command: ["/nodejs/bin/node", "-e", "process.exit(0)"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+EOF
+  if ! kubectl -n "$NAMESPACE" wait --for=condition=complete "job/$job" --timeout=150s; then
+    if ! kubectl -n "$NAMESPACE" logs "job/$job"; then
+      log "mesh: no logs were available for failed probe job $job"
+    fi
+    die "mesh: probe job $job did not complete successfully"
+  fi
+  kubectl -n "$NAMESPACE" logs "job/$job"
+}
+
+check_mesh_advanced() {
+  local code allowed_log intruder_log canary_logs retry_id isolation_id retry_count=0 isolation_count=0 line
+  code="$(curl_probe "http://mesh-demo.$NAMESPACE.svc:3000/variant" | tail -n 1)"
+  [[ "$code" == 000 ]] || die "mesh: an external, non-mesh client reached the full-profile demo (HTTP $code)"
+  pass "mesh: the canary service is not exposed outside the ambient mesh"
+
+  allowed_log="$(run_mesh_probe mesh-probe mesh-probe allowed mesh-probe)"
+  [[ "$allowed_log" == *MESH_PROBE_RESULT\ total=400* ]] || die "mesh: the authorized probe did not report its traffic sample"
+  [[ "$allowed_log" =~ retry_request_id=([A-Za-z0-9_]+)[[:space:]]isolation_request_id=([A-Za-z0-9_]+) ]] ||
+    die "mesh: the authorized probe did not report retry identifiers"
+  retry_id="${BASH_REMATCH[1]}"
+  isolation_id="${BASH_REMATCH[2]}"
+  canary_logs="$(kubectl -n "$NAMESPACE" logs -l mesh.lab/variant=canary -c main --since=10m)"
+  while IFS= read -r line; do
+    if [[ "$line" == *"probe_id=$retry_id"* ]]; then retry_count=$((retry_count + 1)); fi
+    if [[ "$line" == *"probe_id=$isolation_id"* ]]; then isolation_count=$((isolation_count + 1)); fi
+  done <<<"$canary_logs"
+  [[ "$retry_count" -eq 3 ]] || die "mesh: retry amplification was $retry_count attempts; expected the original plus two retries"
+  [[ "$isolation_count" -eq 0 ]] || die "mesh: the ejected canary received another request ($isolation_count backend attempts)"
+  pass "mesh: HTTPRoute balances the 80/20 canary, caps retries at two, and ejects the failing endpoint"
+
+  intruder_log="$(run_mesh_probe mesh-intruder mesh-intruder intruder mesh-intruder)"
+  [[ "$intruder_log" == *MESH_PROBE_DENIED\ status=403* ]] || die "mesh: an unauthorized SPIFFE identity was not denied by the waypoint"
+  pass "mesh: waypoint AuthorizationPolicy rejects the intruder identity with HTTP 403"
+}
+
 prom_query() {
   curl_probe "http://kube-prometheus-stack-prometheus.monitoring.svc:9090/api/v1/$1" -G --data-urlencode "$2"
 }
@@ -785,6 +878,7 @@ main() {
   probe_namespace
   check_db_backup
   check_mesh
+  check_mesh_advanced
   check_observability
   check_tracing
   check_trivy
