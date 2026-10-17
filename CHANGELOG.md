@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 ### Fixed
 
+- Keep pod-IP metrics scraping reachable only to the authenticated Prometheus identity on port
+  9464, while API traffic still requires the waypoint. The Collector's synthetic web probe is
+  limited to GET /healthz. Manifest checks enforce both narrow exceptions.
+
 - The Azure platform exercise uses the merged local waypoint setup and now runs the same advanced
   mesh probe as AWS and Google Cloud: identity restrictions, weighted traffic, timeout and bounded
   retry behavior are exercised through the programmed waypoint.

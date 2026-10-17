@@ -758,7 +758,17 @@ function localPlatformChecks({ objs }, params) {
   eq(
     find(objs, 'AuthorizationPolicy', 'api-require-waypoint')?.spec?.rules?.[0]?.to?.[0]?.operation?.ports,
     ['3000', '9464'],
-    `${overlay}: waypoint is required for API and metrics ports`,
+    `${overlay}: waypoint may reach API and metrics ports`,
+  );
+  eq(
+    (find(objs, 'AuthorizationPolicy', 'api-require-waypoint')?.spec?.rules ?? []).slice(1),
+    [
+      {
+        from: [{ source: { principals: ['cluster.local/ns/monitoring/sa/kube-prometheus-stack-prometheus'] } }],
+        to: [{ operation: { ports: ['9464'] } }],
+      },
+    ],
+    `${overlay}: the only direct pod-IP exception authenticates Prometheus and restricts it to metrics`,
   );
   const apiPolicy = find(objs, 'AuthorizationPolicy', 'api')?.spec;
   eq(apiPolicy?.targetRefs, [{ group: '', kind: 'Service', name: 'api' }], `${overlay}: API L7 policy target`);
@@ -796,8 +806,31 @@ function localPlatformChecks({ objs }, params) {
   eq(webPolicy?.targetRefs, [{ group: '', kind: 'Service', name: 'web' }], `${overlay}: web L7 policy target`);
   eq(
     (webPolicy?.rules ?? []).map((r) => [r.from?.[0]?.source?.principals, r.to?.[0]?.operation?.ports]),
-    [[['cluster.local/ns/dx02v2/sa/dx02v2-istio'], ['8080']]],
+    [
+      [['cluster.local/ns/dx02v2/sa/dx02v2-istio'], ['8080']],
+      [['cluster.local/ns/monitoring/sa/opentelemetry-collector'], ['8080']],
+    ],
     `${overlay}: AuthorizationPolicy web`,
+  );
+  eq(
+    webPolicy?.rules?.[1]?.to?.[0]?.operation,
+    { ports: ['8080'], methods: ['GET'], paths: ['/healthz'] },
+    `${overlay}: Collector has only the synthetic web health operation`,
+  );
+  eq(
+    find(objs, 'NetworkPolicy', 'api-metrics-mesh')?.spec?.ingress,
+    [
+      {
+        from: [
+          {
+            namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'monitoring' } },
+            podSelector: { matchLabels: { 'app.kubernetes.io/name': 'prometheus' } },
+          },
+        ],
+        ports: [{ protocol: 'TCP', port: 15008 }],
+      },
+    ],
+    `${overlay}: only Prometheus gets the direct authenticated metrics transport`,
   );
 
   eq(
