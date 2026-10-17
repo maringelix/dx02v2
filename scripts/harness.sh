@@ -774,12 +774,12 @@ check_contract_app() {
   node - "$example" "$dir/digest-params.env" <<'NODE'
 const fs = require('node:fs');
 const [source, target] = process.argv.slice(2);
-const digest = 'a'.repeat(64);
 const rows = fs.readFileSync(source, 'utf8').split(/\r?\n/).map((row) => {
   const separator = row.indexOf('=');
   if (separator < 0) return row;
   const key = row.slice(0, separator);
   if (key !== 'API_IMAGE' && key !== 'WEB_IMAGE') return row;
+  const digest = (key === 'API_IMAGE' ? 'a' : 'b').repeat(64);
   const value = row.slice(separator + 1);
   return key + '=' + value.replace(/:[0-9a-f]{40}$/, '@sha256:' + digest);
 });
@@ -792,6 +792,11 @@ NODE
     grep -qF '@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
       "$dir/gitops-patches/digest.json" || {
       echo "deploy-azure GitOps rendering must retain the exact approved digest"
+      rc=1
+    }
+    grep -qF '@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+      "$dir/gitops-patches/digest.json" || {
+      echo "GitOps rendering must retain the distinct approved web digest"
       rc=1
     }
   else
