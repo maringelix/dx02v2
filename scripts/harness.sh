@@ -44,7 +44,7 @@ TRIVYIGNORE_MAX_DAYS=214
 CONTRACT_APPCONFIG_KEYS=(
   location resource-group cluster-name vnet-cidr agc-subnet-cidr postgres-subnet-cidr acr/login-server
   keyvault/uri db/secret-name app/admin-token-secret-name eso/cluster-secret-store agc/id agc/frontend-name
-  waf/policy-id deploy/principal-id
+  dns/hostname dns/acme-email waf/policy-id deploy/principal-id
 )
 # Contract: SHA-1 thumbprints of the Azure root CAs in the ConfigMap azure-pg-ca.
 CONTRACT_PG_CA_THUMBPRINTS=(
@@ -70,6 +70,8 @@ REQUIRED_FILES=(
   scripts/dev-env.sh scripts/compose-smoke.sh scripts/e2e-kind.sh scripts/deploy-azure.sh scripts/render-k8s.sh
   scripts/update-crd-schemas.sh scripts/crd-to-jsonschema.mjs scripts/check-manifests.mjs
   scripts/publish-gitops.sh scripts/render-gitops-application.mjs scripts/check-gitops-renderer.mjs
+  scripts/lib/deploy-mode.sh scripts/tests/deploy-mode.sh scripts/write-promotion-statements.sh
+  scripts/tests/promotion-statements.sh
   scripts/sonar-bootstrap.sh scripts/sonar-service.sh scripts/install-sonar-scanner.sh scripts/test-sonar-gate.sh
   scripts/check-codeql-sarif.mjs scripts/test-gitleaks-gate.sh scripts/dast-zap.sh
   scripts/verify-ci-image-artifact.sh scripts/publish-ghcr-images.sh scripts/get-publish-run-metadata.sh
@@ -77,8 +79,13 @@ REQUIRED_FILES=(
   security/dast-baseline.conf security/fixtures/sonar/uncovered.ts security/fixtures/sonar/fixture.lcov
   security/fixtures/dast/server.mjs security/fixtures/dast/zap.conf docs/SEGURANCA_CI.md
   api/migrations/0001_create_messages.sql api/migrations/0002_expand_message_display_name.sql
+  api/src/mesh-demo.ts api/src/mesh-probe.ts api/test/unit/mesh-demo.test.ts api/test/unit/mesh-probe.test.ts
+  deploy/k8s/components/mesh-full/kustomization.yaml deploy/k8s/components/mesh-full/mesh-demo.yaml
+  deploy/k8s/components/mesh-full/mesh-policy.yaml deploy/k8s/components/mesh-full/mesh-route.yaml
   deploy/k8s/components/azure/params.example.env deploy/k8s/schemas/source.env
   deploy/k8s/overlays/azure/gitops-revision.yaml deploy/k8s/overlays/azure-waf/gitops-revision.yaml
+  deploy/k8s/overlays/azure-full/kustomization.yaml deploy/k8s/overlays/azure-full/gitops-revision.yaml
+  deploy/k8s/overlays/azure-waf-full/kustomization.yaml deploy/k8s/overlays/azure-waf-full/gitops-revision.yaml
 )
 STABLE_CI_JOBS=(static test images e2e e2e-platform)
 
@@ -701,6 +708,7 @@ check_contract_app() {
   render_overlays "$dir"
   node scripts/check-manifests.mjs --params "$K8S_PARAMS_EXAMPLE" --local-params "$K8S_LOCAL_PARAMS_EXAMPLE" \
     local="$dir/local.yaml" azure="$dir/azure.yaml" azure-waf="$dir/azure-waf.yaml" \
+    azure-full="$dir/azure-full.yaml" azure-waf-full="$dir/azure-waf-full.yaml" \
     local-platform="$dir/local-platform.yaml" || rc=1
   # The deploy reads exactly the contract keys (no more, no less) under the contract prefix.
   grep -qxF 'APPCONFIG_PREFIX=tx02v2/lab/' "$deploy" || {
@@ -739,7 +747,7 @@ check_contract_app() {
   fi
   example=deploy/k8s/components/azure/params.example.env
   mkdir -p "$dir/gitops-patches"
-  for overlay in azure azure-waf; do
+  for overlay in azure azure-waf azure-full azure-waf-full; do
     if node scripts/render-gitops-application.mjs azure "$overlay" "$example" "$example" \
       >"$dir/gitops-patches/$overlay.json"; then
       node scripts/check-gitops-renderer.mjs "$dir/gitops-patches/$overlay.json" "$dir/$overlay.yaml" || rc=1
@@ -762,9 +770,9 @@ const rows = fs.readFileSync(source, 'utf8').split(/\r?\n/).map((row) => {
 fs.writeFileSync(target, rows.join('\n'));
 NODE
   k8s_validate_params "$dir/digest-params.env" || rc=1
-  if node scripts/render-gitops-application.mjs azure azure "$dir/digest-params.env" "$example" \
+  if node scripts/render-gitops-application.mjs azure azure-full "$dir/digest-params.env" "$example" \
     >"$dir/gitops-patches/digest.json"; then
-    node scripts/check-gitops-renderer.mjs "$dir/gitops-patches/digest.json" "$dir/azure.yaml" || rc=1
+    node scripts/check-gitops-renderer.mjs "$dir/gitops-patches/digest.json" "$dir/azure-full.yaml" || rc=1
     grep -qF '@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
       "$dir/gitops-patches/digest.json" || {
       echo "deploy-azure GitOps rendering must retain the exact approved digest"
@@ -773,15 +781,23 @@ NODE
   else
     rc=1
   fi
-  expected_mode="DEPLOY_MODE=\"\${DEPLOY_MODE:-gitops}\""
-  if ! grep -qF 'DEPLOY_MODE: gitops' .github/workflows/deploy-azure.yml ||
+  expected_mode="DEPLOY_MODE=\"\${DEPLOY_MODE:-auto}\""
+  if ! grep -qF 'default: auto' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'DEPLOY_MODE: ${{ inputs.deploy_mode }}' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'PLATFORM_PROFILE: ${{ inputs.platform_profile }}' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'attestations: write' .github/workflows/deploy-azure.yml ||
+    ! grep -qF 'PLATFORM_PROFILE="${PLATFORM_PROFILE:-core}"' scripts/deploy-azure.sh ||
     ! grep -qF 'contents: write' .github/workflows/deploy-azure.yml ||
     ! grep -qF "$expected_mode" scripts/deploy-azure.sh ||
     grep -qF 'docker build' scripts/deploy-azure.sh ||
     ! grep -qF "bash \"\$REPO_ROOT/scripts/verify-release-bundle.sh\"" scripts/deploy-azure.sh ||
     ! grep -qF "docker pull \"\$source_ref\"" scripts/deploy-azure.sh ||
-    ! grep -qF 'az acr import' scripts/deploy-azure.sh; then
-    echo "deploy-azure must verify the release, promote by digest without rebuilding, and publish GitOps"
+    grep -qF 'az acr import' scripts/deploy-azure.sh ||
+    grep -qF 'az acr repository list' scripts/deploy-azure.sh ||
+    grep -qF 'az acr repository show-tags' scripts/deploy-azure.sh ||
+    ! grep -qF 'docker push "$target_tag"' scripts/deploy-azure.sh ||
+    ! grep -qF 'actions/attest@' .github/workflows/deploy-azure.yml; then
+    echo "deploy-azure must verify, push only to repository-scoped ACR repos, attest target digests, and publish GitOps"
     rc=1
   fi
   expected_push="git -C \"\$tmp/repo\" push --quiet origin \"HEAD:refs/heads/\$branch\""
@@ -1077,6 +1093,15 @@ check_promtool_rules() {
   (cd "$dir" && promtool test rules alerts-test.yaml)
 }
 
+check_deploy_mode() {
+  bash scripts/tests/deploy-mode.sh
+}
+
+check_promotion_statements() {
+  need jq
+  bash scripts/tests/promotion-statements.sh
+}
+
 register_checks() {
   register static tool-versions check_tool_versions
   register static repo-structure check_repo_structure
@@ -1086,6 +1111,8 @@ register_checks() {
   register static policy-images check_policy_images
   register static policy-app check_policy_app
   register static policy-cloud check_policy_cloud
+  register static deploy-mode check_deploy_mode
+  register static promotion-statements check_promotion_statements
   register static trivyignore-policy check_trivyignore_policy
   register static npm-ci check_npm_ci
   register static eslint check_eslint

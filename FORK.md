@@ -76,10 +76,14 @@ Only after tx02v2 is applied in your subscription
 ([its FORK.md](https://github.com/maringelix/tx02v2/blob/main/FORK.md), step 7). Its bootstrap prints
 the repository variables of this fork (`github_variables_dx02v2`: `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `AZURE_APPCONFIG_ENDPOINT`, whose store exists only
-after the apply); then run `deploy-azure` from the Actions tab and approve the `lab` environment. The
-workflow builds and pushes the images, publishes the GitOps revision, waits for Argo CD and runs the
-smoke test through Application Gateway for Containers: [docs/RUNBOOK.md](docs/RUNBOOK.md), sections
-5 to 9. Destroy the lab from tx02v2 on the same day.
+after the apply). First run `publish-images` from `main` with the ID of a successful CI run for the
+same commit. Then run `deploy-azure` from `main` with that release run ID and approve the `lab`
+environment. Choose `platform_profile=core|full` to match the tx02v2 installation, and
+`deploy_mode=auto|gitops|push`; `auto` uses Argo CD when the `dx02v2` Application exists and otherwise
+applies directly. The workflow verifies the release, promotes the images to ACR without rebuilding,
+attests the promoted digests and runs the smoke test through Application Gateway for Containers.
+The full profile also enables the ambient service-mesh canary exercise. See
+[docs/RUNBOOK.md](docs/RUNBOOK.md), sections 5 to 9. Destroy the lab from tx02v2 on the same day.
 
 Your fork is public, and so are its workflow logs. The deploy masks the identifiers it handles; never
 paste credentials or subscription, tenant or client IDs into an issue or a pull request.

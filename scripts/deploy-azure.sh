@@ -12,12 +12,13 @@
 #   RELEASE_RUN_ID            successful publish-images Actions run id for that bundle
 #   GH_TOKEN                  token with actions:read, attestations:read and packages:read
 #   GIT_SHA                   optional; if set, must equal the release manifest source commit
-#   DEPLOY_MODE               gitops (default: publish to gitops/azure and wait for Argo CD) or push
+#   DEPLOY_MODE               auto (default: GitOps when Argo CD exists, direct apply otherwise), gitops or push
+#   PLATFORM_PROFILE          core|full; must match the tx02v2 platform profile installed on AKS
 #   GITHUB_TOKEN              optional locally; Actions uses it for the GitOps branch push
 #   GITHUB_REPOSITORY, GITHUB_ACTOR  repository and GHCR username used to verify/import the release
 #   ARGO_SYNC_TIMEOUT         seconds to wait for the Argo CD Application (default 600)
 #   SMOKE_WAIT_SECONDS        how long the smoke test waits for the AGC frontend (default 900)
-# Steps: verify signed release -> App Configuration contract -> AKS kubeconfig (az aks get-credentials + kubelogin) -> API
+# Steps: verify signed release -> App Configuration contract -> promote and attest ACR digests -> AKS kubeconfig (az aks get-credentials + kubelogin) -> API
 # groups and RBAC preflight -> import verified GHCR digests into ACR without rebuilding -> ConfigMap azure-pg-ca (three root CAs, SHA-1 thumbprints
 # checked) -> configure Argo CD and publish gitops/azure (default) -> sync -> ExternalSecrets
 # -> rollouts -> Gateway address (and WAF policy) -> smoke test through AGC.
@@ -31,6 +32,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 # shellcheck source=scripts/lib/k8s.sh
 source "$REPO_ROOT/scripts/lib/k8s.sh"
+# shellcheck source=scripts/lib/deploy-mode.sh
+source "$REPO_ROOT/scripts/lib/deploy-mode.sh"
 export PATH="$REPO_ROOT/.tools/bin:$PATH"
 
 NAMESPACE=dx02v2
@@ -39,7 +42,7 @@ APPCONFIG_PREFIX=tx02v2/lab/
 CONTRACT_KEYS=(
   location resource-group cluster-name vnet-cidr agc-subnet-cidr postgres-subnet-cidr acr/login-server
   keyvault/uri db/secret-name app/admin-token-secret-name eso/cluster-secret-store agc/id agc/frontend-name
-  waf/policy-id deploy/principal-id
+  dns/hostname dns/acme-email waf/policy-id deploy/principal-id
 )
 # Values fixed in deploy/k8s/components/azure and in this script: the store of tx02v2 must agree.
 CONTRACT_RESOURCE_GROUP=tx02v2-lab
@@ -76,6 +79,7 @@ ACR_NAME=""
 ACR_LOGGED_IN=0
 API_IMAGE=""
 WEB_IMAGE=""
+DNS_HOSTNAME=""
 RELEASE_MANIFEST=""
 API_SOURCE_NAME=""
 API_SOURCE_DIGEST=""
@@ -86,7 +90,9 @@ WEB_IMAGE_ID=""
 WAF_SERVED=0
 GATEWAY_ADDRESS=""
 BASE=""
-DEPLOY_MODE="${DEPLOY_MODE:-gitops}"
+DEPLOY_MODE="${DEPLOY_MODE:-auto}"
+PLATFORM_PROFILE="${PLATFORM_PROFILE:-core}"
+PROMOTE_ONLY=false
 ARGO_SYNC_TIMEOUT="${ARGO_SYNC_TIMEOUT:-600}"
 GITOPS_REV=""
 
@@ -135,6 +141,7 @@ write_summary() { # RESULT
     echo "| Item | Value |"
     echo "|---|---|"
     echo "| Commit | \`${GIT_SHA:-unknown}\` |"
+    echo "| Profile | \`$PLATFORM_PROFILE\` |"
     echo "| Overlay | \`deploy/k8s/overlays/$OVERLAY\` |"
     printf "| Images | API \`%s\`, web \`%s\` in ACR |\n" "$api_digest" "$web_digest"
     echo "| Entry point | $([[ -n "$GATEWAY_ADDRESS" ]] && echo 'AGC ready' || echo 'not reached') |"
@@ -163,6 +170,20 @@ cleanup() {
   exit "$rc"
 }
 
+write_github_outputs() {
+  [[ -n "${GITHUB_OUTPUT:-}" ]] || return 0
+  [[ "$API_IMAGE" == *@sha256:* && "$WEB_IMAGE" == *@sha256:* ]] ||
+    die "refusing to publish invalid ACR image outputs"
+  {
+    printf 'acr_name=%s\n' "$ACR_NAME"
+    printf 'acr_login_server=%s\n' "$(param acr/login-server)"
+    printf 'api_name=%s\n' "${API_IMAGE%@*}"
+    printf 'api_digest=%s\n' "${API_IMAGE##*@}"
+    printf 'web_name=%s\n' "${WEB_IMAGE%@*}"
+    printf 'web_digest=%s\n' "${WEB_IMAGE##*@}"
+  } >>"$GITHUB_OUTPUT"
+}
+
 preflight() {
   local release_sha
   require_cmd az kubectl kubelogin docker node git curl base64 gh jq
@@ -189,7 +210,10 @@ preflight() {
     die "AZURE_APPCONFIG_ENDPOINT is required (the App Configuration endpoint output by tx02v2)"
   [[ "$AZURE_APPCONFIG_ENDPOINT" =~ $APPCONFIG_ENDPOINT_PATTERN ]] ||
     die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (docs/CONTRATO.md)"
-  [[ "$DEPLOY_MODE" == gitops || "$DEPLOY_MODE" == push ]] || die "DEPLOY_MODE must be gitops or push"
+  [[ "$DEPLOY_MODE" == auto || "$DEPLOY_MODE" == gitops || "$DEPLOY_MODE" == push ]] ||
+    die "DEPLOY_MODE must be auto, gitops or push"
+  [[ "$PLATFORM_PROFILE" == core || "$PLATFORM_PROFILE" == full ]] ||
+    die "PLATFORM_PROFILE must be core or full"
   if [[ ! "$ARGO_SYNC_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
     die "ARGO_SYNC_TIMEOUT must be an integer of at least 5 seconds"
   fi
@@ -237,6 +261,18 @@ read_contract() {
   expect_format deploy/principal-id "^$K8S_GUID\$"
   expect_format agc/id "${K8S_PARAM_PATTERN[AGC_ID]}"
   expect_format agc/frontend-name "${K8S_PARAM_PATTERN[AGC_FRONTEND]}"
+  expect_format dns/hostname "${K8S_PARAM_PATTERN[DNS_HOSTNAME]}"
+  expect_format dns/acme-email '^([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|disabled)$'
+  if [[ "$(param dns/hostname)" == disabled ]]; then
+    [[ "$(param dns/acme-email)" == disabled ]] || die "DNS disabled but the ACME contact is configured"
+  else
+    [[ "$(param dns/acme-email)" != disabled ]] || die "DNS enabled without an ACME contact"
+  fi
+  if [[ "$PLATFORM_PROFILE" == full ]]; then
+    [[ "$(param dns/hostname)" != disabled ]] ||
+      die "profile full requires tx02v2 public DNS and a ready ACME certificate (docs/CONTRATO.md)"
+  fi
+  DNS_HOSTNAME="$(param dns/hostname)"
   expect_format waf/policy-id "${K8S_PARAM_PATTERN[WAF_POLICY_ID]}"
   expect_format agc-subnet-cidr "${K8S_PARAM_PATTERN[AGC_SUBNET_CIDR]}"
   expect_format postgres-subnet-cidr "${K8S_PARAM_PATTERN[POSTGRES_SUBNET_CIDR]}"
@@ -252,20 +288,24 @@ read_contract() {
     [[ "${waf_subscription%%/*}" == "$SUBSCRIPTION_ID" ]] ||
       die "App Configuration ${APPCONFIG_PREFIX}waf/policy-id is in another subscription than agc/id"
   fi
+  if [[ "$PLATFORM_PROFILE" == full ]]; then
+    if [[ "$OVERLAY" == azure-waf ]]; then OVERLAY=azure-waf-full; else OVERLAY=azure-full; fi
+  fi
   [[ "$(az account show --query id --output tsv)" == "$SUBSCRIPTION_ID" ]] ||
     die "the Azure CLI is logged in to another subscription than the one of agc/id (az account set --subscription <lab subscription>)"
   ACR_NAME="$(param acr/login-server)"
   ACR_NAME="${ACR_NAME%%.*}"
   API_IMAGE="$(param acr/login-server)/dx02v2/api@$API_SOURCE_DIGEST"
   WEB_IMAGE="$(param acr/login-server)/dx02v2/web@$WEB_SOURCE_DIGEST"
-  log "contract: ${#CONTRACT_KEYS[@]} keys read and consistent with the manifests (overlay $OVERLAY)"
+  log "contract: ${#CONTRACT_KEYS[@]} keys read and consistent with profile $PLATFORM_PROFILE (overlay $OVERLAY)"
 }
 
 # connect_cluster -> temporary kubeconfig, then proof that the platform layer of tx02v2 is there and
 # that this principal may write every kind of the overlay (fails before anything is built or pushed).
 connect_cluster() {
-  local versions resources resource
+  local versions resources resource waypoint
   local -a missing=()
+  local -a required_resources=("${DEPLOY_RESOURCES[@]}")
   export KUBECONFIG="$WORK_DIR/kubeconfig"
   az aks get-credentials --subscription "$SUBSCRIPTION_ID" --resource-group "$(param resource-group)" \
     --name "$(param cluster-name)" --file "$KUBECONFIG" --only-show-errors >/dev/null ||
@@ -277,6 +317,18 @@ connect_cluster() {
   for resource in gateway.networking.k8s.io/v1 alb.networking.azure.io/v1 external-secrets.io/v1; do
     grep -qxF "$resource" <<<"$versions" || missing+=("$resource")
   done
+  if [[ "$PLATFORM_PROFILE" == full ]]; then
+    for resource in networking.istio.io/v1 security.istio.io/v1; do
+      grep -qxF "$resource" <<<"$versions" || missing+=("$resource")
+    done
+    required_resources+=(destinationrules.networking.istio.io authorizationpolicies.security.istio.io)
+    waypoint="$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.metadata.labels.istio\.io/use-waypoint}')" ||
+      die "cannot read the $NAMESPACE namespace labels (install the tx02v2 full platform first)"
+    [[ "$waypoint" == dx02v2-waypoint ]] ||
+      die "PLATFORM_PROFILE=full needs the dx02v2-waypoint namespace waypoint installed by tx02v2"
+    [[ "$(kubectl -n "$NAMESPACE" get gateway dx02v2-waypoint -o jsonpath='{.status.conditions[?(@.type==\"Programmed\")].status}')" == True ]] ||
+      die "the dx02v2-waypoint Gateway is not Programmed"
+  fi
   ((${#missing[@]} == 0)) ||
     die "the cluster does not serve ${missing[*]}: install the tx02v2 platform layer (ALB Controller, External Secrets Operator)"
   resources="$(kubectl api-resources --api-group=alb.networking.azure.io -o name)" ||
@@ -284,13 +336,13 @@ connect_cluster() {
   if grep -qxF "$WAF_RESOURCE" <<<"$resources"; then
     WAF_SERVED=1
   fi
-  if [[ "$OVERLAY" == azure-waf ]] && ((WAF_SERVED == 0)); then
+  if [[ "$OVERLAY" == azure-waf || "$OVERLAY" == azure-waf-full ]] && ((WAF_SERVED == 0)); then
     die "waf/policy-id names a WAF policy, but the ALB Controller of tx02v2 does not serve $WAF_RESOURCE"
   fi
-  for resource in "${DEPLOY_RESOURCES[@]}"; do
+  for resource in "${required_resources[@]}"; do
     [[ "$(kubectl auth can-i create "$resource" -n "$NAMESPACE" 2>/dev/null)" == yes ]] || missing+=("create $resource")
   done
-  if [[ "$OVERLAY" == azure-waf ]]; then
+  if [[ "$OVERLAY" == azure-waf || "$OVERLAY" == azure-waf-full ]]; then
     [[ "$(kubectl auth can-i create "$WAF_RESOURCE" -n "$NAMESPACE" 2>/dev/null)" == yes ]] || missing+=("create $WAF_RESOURCE")
   elif ((WAF_SERVED)); then
     [[ "$(kubectl auth can-i delete "$WAF_RESOURCE" -n "$NAMESPACE" 2>/dev/null)" == yes ]] || missing+=("delete $WAF_RESOURCE")
@@ -298,6 +350,15 @@ connect_cluster() {
   [[ "$(kubectl auth can-i get secrets -n "$NAMESPACE" 2>/dev/null)" == yes ]] || missing+=("get secrets")
   ((${#missing[@]} == 0)) ||
     die "this principal cannot deploy to namespace $NAMESPACE (${missing[*]}): it needs the RoleBinding dx02v2-deployers of the tx02v2 platform layer (Role dx02v2-deployer; subject: the object ID of dx02v2-gha-deploy, or yours in app_deployer_principal_ids)"
+  if [[ "$DEPLOY_MODE" == auto ]]; then
+    DEPLOY_MODE="$(resolve_azure_deploy_mode "$DEPLOY_MODE")" ||
+      die "cannot select a safe deploy mode; resolve Argo CD access and retry"
+    if [[ "$DEPLOY_MODE" == gitops ]]; then
+      log "Argo CD Application dx02v2 exists; using GitOps"
+    else
+      log "Argo CD Application dx02v2 is absent; applying the Azure overlay directly"
+    fi
+  fi
   if [[ "$DEPLOY_MODE" == gitops ]]; then
     [[ "$(kubectl auth can-i patch applications.argoproj.io/dx02v2 -n argocd 2>/dev/null)" == yes ]] ||
       die "this principal cannot patch the Argo CD Application dx02v2 in argocd (tx02v2 full platform Role)"
@@ -308,40 +369,36 @@ connect_cluster() {
 }
 
 # promote_image COMPONENT GHCR_NAME DIGEST EXPECTED_IMAGE_ID -> immutable ACR image reference.
-# ACR Basic does not enforce immutable tags, so an existing commit tag must match the signed digest.
+# ACR Basic does not enforce immutable tags, so an existing commit tag must contain the verified image ID.
 promote_image() {
   local component="$1" source_name="$2" source_digest="$3" expected_id="$4"
   local source_ref="$source_name@$source_digest" image_tag="dx02v2/$component:$GIT_SHA"
-  local repositories="" tags="" target_digest="" target_ref target_id source_id
+  local target_tag="$(param acr/login-server)/$image_tag" target_digest="" target_ref target_id source_id show_error
   docker pull "$source_ref" >/dev/null || die "cannot pull verified $component source digest $source_ref"
   source_id="$(docker image inspect "$source_ref" --format '{{.Id}}')"
   [[ "$source_id" == "$expected_id" ]] ||
     die "$component GHCR digest does not contain the image ID from the release manifest"
-  repositories="$(az acr repository list --name "$ACR_NAME" --output tsv --only-show-errors)" ||
-    die "cannot list the repositories of $ACR_NAME (the deploy identity needs Container Registry Data Importer and Data Reader; see the R8 tx02v2 contract update)"
-  if grep -qxF "dx02v2/$component" <<<"$repositories"; then
-    tags="$(az acr repository show-tags --name "$ACR_NAME" --repository "dx02v2/$component" --output tsv --only-show-errors)" ||
-      die "cannot list the tags of dx02v2/$component in $ACR_NAME"
-  fi
-  if grep -qxF "$GIT_SHA" <<<"$tags"; then
-    target_digest="$(az acr repository show --name "$ACR_NAME" --image "$image_tag" --query digest --output tsv --only-show-errors)" ||
-      die "cannot resolve the existing ACR digest for $image_tag"
-    [[ "$target_digest" == "$source_digest" ]] ||
-      die "ACR tag $image_tag already points to a digest other than the verified release; refusing to overwrite it"
+  if target_digest="$(az acr repository show --name "$ACR_NAME" --image "$image_tag" --query digest --output tsv --only-show-errors 2>"$WORK_DIR/$component-acr-show.err")"; then
+    [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+      die "ACR returned an invalid digest for the existing tag $image_tag"
     log "$image_tag already exists with the verified digest; reusing it" >&2
   else
-    az acr import --name "$ACR_NAME" --source "$source_ref" --image "$image_tag" \
-      --username "$GITHUB_ACTOR" --password "$GH_TOKEN" --only-show-errors --output none ||
-      die "cannot import the verified $component digest into ACR without rebuilding"
+    show_error="$(cat "$WORK_DIR/$component-acr-show.err")"
+    case "${show_error,,}" in
+      *manifest_unknown*|*manifest*not\ found*|*notfound*|*"status code: 404"*|*"(404)"*) ;;
+      *) die "cannot check the ACR tag $image_tag: $show_error" ;;
+    esac
+    docker tag "$source_ref" "$target_tag" || die "cannot tag the verified $component image for ACR"
+    docker push "$target_tag" >/dev/null || die "cannot push the verified $component image to its repository in ACR"
     target_digest="$(az acr repository show --name "$ACR_NAME" --image "$image_tag" --query digest --output tsv --only-show-errors)" ||
-      die "cannot resolve the imported ACR digest for $image_tag"
-    [[ "$target_digest" == "$source_digest" ]] ||
-      die "ACR import changed the approved $component manifest digest (source $source_digest, ACR $target_digest)"
+      die "cannot resolve the pushed ACR digest for $image_tag"
+    [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+      die "ACR returned an invalid digest for the pushed tag $image_tag"
   fi
   target_ref="$(param acr/login-server)/dx02v2/$component@$target_digest"
   docker pull "$target_ref" >/dev/null || die "cannot pull the promoted $component digest from ACR"
   target_id="$(docker image inspect "$target_ref" --format '{{.Id}}')"
-  [[ "$target_id" == "$expected_id" ]] || die "promoted $component ACR digest differs from the signed GHCR image"
+  [[ "$target_id" == "$expected_id" ]] || die "promoted $component ACR image ID differs from the verified GHCR release"
   printf '%s' "$target_ref"
 }
 
@@ -349,7 +406,7 @@ publish_images() {
   local acr_login_server
   acr_login_server="$(param acr/login-server)"
   az acr login --name "$ACR_NAME" --only-show-errors >/dev/null ||
-    die "docker login to $ACR_NAME failed (the deploy identity needs Container Registry Data Importer and Data Reader; see the R8 tx02v2 contract update)"
+    die "docker login to $ACR_NAME failed (the deploy identity needs Repository Writer on the two dx02v2 repositories; see the R8 tx02v2 contract update)"
   ACR_LOGGED_IN=1
   API_IMAGE="$(promote_image api "$API_SOURCE_NAME" "$API_SOURCE_DIGEST" "$API_IMAGE_ID")"
   WEB_IMAGE="$(promote_image web "$WEB_SOURCE_NAME" "$WEB_SOURCE_DIGEST" "$WEB_IMAGE_ID")"
@@ -401,6 +458,7 @@ write_params() {
     echo "WEB_IMAGE=$WEB_IMAGE"
     echo "AGC_ID=$(param agc/id)"
     echo "AGC_FRONTEND=$(param agc/frontend-name)"
+    echo "DNS_HOSTNAME=$DNS_HOSTNAME"
     echo "WAF_POLICY_ID=$(param waf/policy-id)"
     echo "AGC_SUBNET_CIDR=$(param agc-subnet-cidr)"
     echo "POSTGRES_SUBNET_CIDR=$(param postgres-subnet-cidr)"
@@ -435,7 +493,7 @@ render_and_apply() {
   kubectl kustomize "$tree/overlays/$OVERLAY" >"$WORK_DIR/rendered.yaml"
   log "overlays/$OVERLAY rendered: $(grep -c '^kind: ' "$WORK_DIR/rendered.yaml") objects"
   kubectl apply -k "$tree/overlays/$OVERLAY"
-  if [[ "$OVERLAY" == azure ]] && ((WAF_SERVED)); then
+  if [[ "$OVERLAY" != azure-waf && "$OVERLAY" != azure-waf-full ]] && ((WAF_SERVED)); then
     # waf/policy-id is none: a policy left by an earlier deploy would point at a deleted WAF policy.
     kubectl -n "$NAMESPACE" delete "$WAF_RESOURCE" dx02v2 --ignore-not-found
   fi
@@ -507,7 +565,7 @@ wait_for_gateway() {
   fi
   GATEWAY_ADDRESS="$(kubectl -n "$NAMESPACE" get gateway dx02v2 -o jsonpath='{.status.addresses[0].value}')"
   [[ "$GATEWAY_ADDRESS" =~ ^[A-Za-z0-9.-]+$ ]] || die "the programmed Gateway has no frontend address"
-  if [[ "$OVERLAY" == azure-waf ]]; then
+  if [[ "$OVERLAY" == azure-waf || "$OVERLAY" == azure-waf-full ]]; then
     if ! kubectl -n "$NAMESPACE" wait "$WAF_RESOURCE/dx02v2" --for=condition=Accepted --timeout=300s; then
       kubectl -n "$NAMESPACE" describe "$WAF_RESOURCE" dx02v2 >&2 || :
       die "the WebApplicationFirewallPolicy was not accepted (SecurityPolicy of the AGC in tx02v2; see the events above)"
@@ -520,11 +578,21 @@ wait_for_gateway() {
 
 smoke() {
   local status=0
-  BASE="http://$GATEWAY_ADDRESS"
-  # The admin token is a credential: the frontend of the AGC answers plain HTTP only (HTTPS in the
-  # clouds is outside the scope of v2), so the token is neither read nor sent, and the smoke test skips
-  # the one call that needs it (SKIP in the summary). The checks that send a made-up token still run.
-  log "the entry point is plain HTTP: the admin token is not read, and the smoke test skips the DELETE that needs it"
+  if [[ "$PLATFORM_PROFILE" == full ]]; then
+    BASE="https://$DNS_HOSTNAME"
+    local code location
+    code="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "http://$DNS_HOSTNAME/api/healthz")" ||
+      die "the public HTTP entry point is unreachable"
+    location="$(curl -sS -m 15 -D - -o /dev/null "http://$DNS_HOSTNAME/api/healthz" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' | head -n 1)" ||
+      die "the public HTTP redirect did not return a Location header"
+    [[ "$code" == 301 && "$location" == "https://$DNS_HOSTNAME/api/healthz" ]] ||
+      die "HTTP must redirect to the same HTTPS hostname and path (got $code and $location)"
+  else
+    BASE="http://$GATEWAY_ADDRESS"
+  fi
+  # Never read or send the admin token in the smoke test. Public HTTPS is verified in full;
+  # core is intentionally an HTTP learning path, so its credentialed DELETE remains skipped.
+  log "smoke target: $BASE; credentialed DELETE is skipped"
   # SMOKE_EDGE=agc: AGC routes /api straight to the API and assigns its own X-Request-Id; the WAF
   # policy inspects bodies up to 128 KB, so the API itself answers 413 for the 70 KB body.
   BASE_URL="$BASE" ADMIN_TOKEN="" SMOKE_EDGE=agc SMOKE_WAIT_SECONDS="${SMOKE_WAIT_SECONDS:-900}" \
@@ -533,12 +601,23 @@ smoke() {
 }
 
 main() {
-  (($# == 0)) || die "usage: $0 (configuration through environment variables, see the header)"
+  if (($# == 1)) && [[ "$1" == --promote-only ]]; then
+    PROMOTE_ONLY=true
+  elif (($# != 0)); then
+    die "usage: $0 [--promote-only] (configuration through environment variables, see the header)"
+  fi
   preflight
   WORK_DIR="$(mktemp -d)"
   trap cleanup EXIT
   section "contract: App Configuration ${APPCONFIG_PREFIX}*"
   read_contract
+  if [[ "$PROMOTE_ONLY" == true ]]; then
+    section "registry $ACR_NAME: promote verified image digests"
+    publish_images
+    write_github_outputs
+    log "promotion complete; the workflow will attest the ACR digests before deploying them"
+    return 0
+  fi
   section "cluster $(param cluster-name): kubeconfig, platform API groups, RBAC"
   connect_cluster
   section "registry $ACR_NAME: promote verified image digests"

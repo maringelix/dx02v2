@@ -1,7 +1,7 @@
-// Structural checks of the rendered Kubernetes manifests against contract v2 (docs/CONTRATO.md)
+// Structural checks of the rendered Kubernetes manifests against contract v4 (docs/CONTRATO.md)
 // and the hardening rules of docs/GUARDRAILS.md. Used by the harness check `contract-app`.
 //   node scripts/check-manifests.mjs --params <params.env> --local-params <params.env> local=<file> azure=<file>
-//     azure-waf=<file> local-platform=<file>
+//     azure-waf=<file> azure-full=<file> azure-waf-full=<file> local-platform=<file>
 import { readFileSync } from 'node:fs';
 import { parseAllDocuments } from 'yaml';
 
@@ -9,7 +9,9 @@ const NAMESPACE = 'dx02v2';
 // Kinds the deployer Role of tx02v2 may write (docs/CONTRATO.md). Secrets are written by ESO only.
 const DEPLOYER_KINDS = new Set([
   'ConfigMap',
+  'AuthorizationPolicy',
   'Deployment',
+  'DestinationRule',
   'ExternalSecret',
   'Gateway',
   'HTTPRoute',
@@ -239,23 +241,44 @@ function commonChecks(overlay, { text, objs }) {
     { 'k8s-app': 'kube-dns' },
     `${overlay}: DNS egress target`,
   );
-  eq(
-    find(objs, 'NetworkPolicy', 'web-egress-to-api')?.spec?.egress?.[0]?.ports,
-    [{ protocol: 'TCP', port: 3000 }],
-    `${overlay}: web -> api:3000`,
-  );
-  eq(
-    find(objs, 'NetworkPolicy', 'api-ingress-from-web')?.spec?.ingress?.[0]?.from?.[0]?.podSelector?.matchLabels,
-    { 'app.kubernetes.io/name': 'web' },
-    `${overlay}: api accepts web`,
-  );
+  const waypointFull = overlay.endsWith('-full') || overlay === 'local-platform';
+  const appEgress = find(objs, 'NetworkPolicy', 'web-egress-to-api')?.spec?.egress?.[0];
+  if (waypointFull) {
+    eq(
+      appEgress?.to?.[0]?.podSelector?.matchLabels,
+      { 'gateway.networking.k8s.io/gateway-name': 'dx02v2-waypoint' },
+      `${overlay}: web reaches the API through the namespace waypoint`,
+    );
+    eq(appEgress?.ports, [{ protocol: 'TCP', port: 15008 }], `${overlay}: web egress uses HBONE only`);
+    eq(
+      find(objs, 'NetworkPolicy', 'api-ingress-from-web')?.spec?.ingress?.[0]?.from?.[0]?.podSelector?.matchLabels,
+      { 'gateway.networking.k8s.io/gateway-name': 'dx02v2-waypoint' },
+      `${overlay}: API accepts the waypoint, not direct web traffic`,
+    );
+  } else {
+    eq(appEgress?.ports, [{ protocol: 'TCP', port: 3000 }], `${overlay}: web -> api:3000`);
+    eq(
+      find(objs, 'NetworkPolicy', 'api-ingress-from-web')?.spec?.ingress?.[0]?.from?.[0]?.podSelector?.matchLabels,
+      { 'app.kubernetes.io/name': 'web' },
+      `${overlay}: api accepts web`,
+    );
+  }
   const metrics = find(objs, 'NetworkPolicy', 'api-metrics-from-monitoring')?.spec?.ingress?.[0];
-  eq(
-    metrics?.from?.[0]?.namespaceSelector?.matchLabels,
-    { 'kubernetes.io/metadata.name': 'monitoring' },
-    `${overlay}: metrics source`,
-  );
-  eq(metrics?.ports, [{ protocol: 'TCP', port: 9464 }], `${overlay}: metrics port`);
+  if (waypointFull) {
+    eq(
+      metrics?.from?.[0]?.podSelector?.matchLabels,
+      { 'gateway.networking.k8s.io/gateway-name': 'dx02v2-waypoint' },
+      `${overlay}: metrics requests use the waypoint`,
+    );
+    eq(metrics?.ports, [{ protocol: 'TCP', port: 15008 }], `${overlay}: metrics use HBONE`);
+  } else {
+    eq(
+      metrics?.from?.[0]?.namespaceSelector?.matchLabels,
+      { 'kubernetes.io/metadata.name': 'monitoring' },
+      `${overlay}: metrics source`,
+    );
+    eq(metrics?.ports, [{ protocol: 'TCP', port: 9464 }], `${overlay}: metrics port`);
+  }
   return { apiSpec, apiContainer, migrate, webContainer };
 }
 
@@ -296,6 +319,7 @@ function localChecks({ objs }) {
 }
 
 function azureChecks(overlay, { objs }, params, waf) {
+  const full = overlay.endsWith('-full');
   for (const o of objs) {
     check(DEPLOYER_KINDS.has(o.kind), `${overlay}: ${o.kind} is outside what the dx02v2-deployer Role may write`);
     eq(
@@ -349,19 +373,43 @@ function azureChecks(overlay, { objs }, params, waf) {
     [{ type: 'alb.networking.azure.io/alb-frontend', value: params.AGC_FRONTEND }],
     `${overlay}: AGC frontend from params`,
   );
+  const httpListener = {
+    name: 'http',
+    protocol: 'HTTP',
+    port: 80,
+    ...(full ? { hostname: params.DNS_HOSTNAME } : {}),
+    allowedRoutes: { namespaces: { from: 'Same' } },
+  };
+  const httpsListener = {
+    name: 'https',
+    protocol: 'HTTPS',
+    port: 443,
+    hostname: params.DNS_HOSTNAME,
+    tls: { mode: 'Terminate', certificateRefs: [{ name: 'dx02v2-tls' }] },
+    allowedRoutes: { namespaces: { from: 'Same' } },
+  };
+  eq(gateway?.spec?.listeners, full ? [httpListener, httpsListener] : [httpListener], `${overlay}: Gateway listeners`);
   eq(
-    gateway?.spec?.listeners,
-    [{ name: 'http', protocol: 'HTTP', port: 80, allowedRoutes: { namespaces: { from: 'Same' } } }],
-    `${overlay}: one HTTP listener on 80 (HTTPS planned)`,
-  );
-  eq(
-    all(objs, 'HTTPRoute').map((r) => r.metadata?.name),
-    ['dx02v2'],
-    `${overlay}: exactly one HTTPRoute`,
+    all(objs, 'HTTPRoute')
+      .map((r) => r.metadata?.name)
+      .sort(),
+    full ? ['dx02v2', 'dx02v2-http-redirect', 'mesh-demo'] : ['dx02v2'],
+    `${overlay}: external route and optional mesh exercise route`,
   );
   const route = find(objs, 'HTTPRoute', 'dx02v2')?.spec;
-  eq(route?.parentRefs, [{ name: 'dx02v2', sectionName: 'http' }], `${overlay}: HTTPRoute parent`);
-  check(route?.hostnames === undefined, `${overlay}: HTTPRoute without hostnames (generated AGC FQDN)`);
+  eq(route?.parentRefs, [{ name: 'dx02v2', sectionName: full ? 'https' : 'http' }], `${overlay}: HTTPRoute parent`);
+  eq(route?.hostnames, full ? [params.DNS_HOSTNAME] : undefined, `${overlay}: HTTPRoute hostname`);
+  if (full) {
+    check(params.DNS_HOSTNAME !== 'disabled', `${overlay}: public DNS hostname is required for HTTPS`);
+    const redirect = find(objs, 'HTTPRoute', 'dx02v2-http-redirect')?.spec;
+    eq(redirect?.parentRefs, [{ name: 'dx02v2', sectionName: 'http' }], `${overlay}: HTTP redirect parent`);
+    eq(redirect?.hostnames, [params.DNS_HOSTNAME], `${overlay}: HTTP redirect hostname`);
+    eq(
+      redirect?.rules,
+      [{ filters: [{ type: 'RequestRedirect', requestRedirect: { scheme: 'https', statusCode: 301 } }] }],
+      `${overlay}: HTTP redirects to HTTPS without an app backend`,
+    );
+  }
   eq(
     (route?.rules ?? []).map((r) => [
       r.matches?.length,
@@ -469,6 +517,25 @@ function azureChecks(overlay, { objs }, params, waf) {
       `${overlay}: NetworkPolicy ${name} (one CIDR from params, one port, no except)`,
     );
   }
+  const acmePolicy = find(objs, 'NetworkPolicy', 'acme-solver-ingress-from-agc')?.spec;
+  if (full) {
+    eq(
+      acmePolicy,
+      {
+        podSelector: { matchLabels: { 'acme.cert-manager.io/http01-solver': 'true' } },
+        policyTypes: ['Ingress'],
+        ingress: [
+          {
+            from: [{ ipBlock: { cidr: params.AGC_SUBNET_CIDR } }],
+            ports: [{ protocol: 'TCP', port: 8089 }],
+          },
+        ],
+      },
+      `${overlay}: ACME renewals are allowed only from AGC to solver port 8089`,
+    );
+  } else {
+    eq(acmePolicy, undefined, `${overlay}: core has no ACME solver network exception`);
+  }
   // Contract v2: traces to the OpenTelemetry Collector of the platform layer, and nowhere else.
   eq(
     config.OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -490,6 +557,89 @@ function azureChecks(overlay, { objs }, params, waf) {
     ],
     `${overlay}: api -> OpenTelemetry Collector (4318) only`,
   );
+  if (overlay.endsWith('-full')) meshFullChecks(overlay, { objs }, params.API_IMAGE);
+}
+
+function meshFullChecks(overlay, { objs }, approvedApiImage) {
+  for (const name of ['mesh-demo', 'mesh-probe', 'mesh-intruder']) {
+    eq(
+      find(objs, 'ServiceAccount', name)?.automountServiceAccountToken,
+      false,
+      `${overlay}: ${name} does not receive a service account token`,
+    );
+  }
+  for (const [name, variant] of [
+    ['mesh-stable', 'stable'],
+    ['mesh-canary', 'canary'],
+  ]) {
+    const workload = find(objs, 'Deployment', name);
+    const spec = workload === undefined ? {} : podChecks(`${overlay}: Deployment/${name}`, workload);
+    eq(spec.serviceAccountName, 'mesh-demo', `${overlay}: ${name} service account`);
+    eq(spec.containers?.[0]?.image, approvedApiImage, `${overlay}: ${name} uses the approved API image`);
+    eq(spec.containers?.[0]?.args, ['dist/mesh-demo.js'], `${overlay}: ${name} runs the mesh exercise server`);
+    eq(
+      spec.containers?.[0]?.env?.find((entry) => entry.name === 'MESH_VARIANT')?.value,
+      variant,
+      `${overlay}: ${name} variant`,
+    );
+  }
+  const route = find(objs, 'HTTPRoute', 'mesh-demo')?.spec;
+  eq(
+    route?.parentRefs?.map((parent) => [parent.group ?? '', parent.kind, parent.name, parent.port]),
+    [['', 'Service', 'mesh-demo', 3000]],
+    `${overlay}: mesh route attaches to the waypoint-handled service`,
+  );
+  const weighted = (route?.rules ?? []).find((rule) => rule.name === 'weighted-canary');
+  eq(
+    weighted?.backendRefs?.map((backend) => [backend.name, backend.port, backend.weight]),
+    [
+      ['mesh-stable', 3000, 80],
+      ['mesh-canary', 3000, 20],
+    ],
+    `${overlay}: canary traffic split`,
+  );
+  eq(
+    (route?.rules ?? []).find((rule) => rule.name === 'bounded-retries')?.retry,
+    { attempts: 2, codes: [500, 502, 503, 504] },
+    `${overlay}: bounded retry policy`,
+  );
+  const outlier = find(objs, 'DestinationRule', 'mesh-canary')?.spec?.trafficPolicy?.outlierDetection;
+  eq(
+    [outlier?.consecutive5xxErrors, outlier?.maxEjectionPercent],
+    [3, 100],
+    `${overlay}: repeated canary failures eject the endpoint`,
+  );
+  const allowed = find(objs, 'AuthorizationPolicy', 'mesh-demo')?.spec;
+  eq(allowed?.targetRefs, [{ group: '', kind: 'Service', name: 'mesh-demo' }], `${overlay}: waypoint L7 policy target`);
+  check(
+    allowed?.rules?.some((rule) =>
+      rule.from?.[0]?.source?.principals?.includes('cluster.local/ns/dx02v2/sa/mesh-probe'),
+    ),
+    `${overlay}: only the mesh-probe identity may use the exercise`,
+  );
+  eq(
+    find(objs, 'AuthorizationPolicy', 'mesh-demo-require-waypoint')?.spec?.rules?.[0]?.from?.[0]?.source?.principals,
+    ['cluster.local/ns/dx02v2/sa/dx02v2-waypoint'],
+    `${overlay}: demo backends accept the waypoint identity only`,
+  );
+  const waypointSelector = { 'gateway.networking.k8s.io/gateway-name': 'dx02v2-waypoint' };
+  for (const name of ['mesh-probe-egress', 'mesh-intruder-egress']) {
+    eq(
+      find(objs, 'NetworkPolicy', name)?.spec?.egress?.[0]?.to?.[0]?.podSelector?.matchLabels,
+      waypointSelector,
+      `${overlay}: ${name} cannot bypass the waypoint`,
+    );
+    eq(
+      find(objs, 'NetworkPolicy', name)?.spec?.egress?.[0]?.ports,
+      [{ protocol: 'TCP', port: 15008 }],
+      `${overlay}: ${name} reaches only the waypoint over HBONE`,
+    );
+  }
+  eq(
+    find(objs, 'NetworkPolicy', 'mesh-demo-ingress')?.spec?.ingress?.[0],
+    { from: [{ podSelector: { matchLabels: waypointSelector } }], ports: [{ protocol: 'TCP', port: 15008 }] },
+    `${overlay}: demo backends accept HBONE from the waypoint only`,
+  );
 }
 
 // Kinds the AppProject dx02v2 of the tx02v2 local lab lets Argo CD sync (local contract,
@@ -498,6 +648,7 @@ const APPPROJECT_KINDS = new Set([
   'AuthorizationPolicy',
   'ConfigMap',
   'Deployment',
+  'DestinationRule',
   'ExternalSecret',
   'Gateway',
   'HTTPRoute',
@@ -599,21 +750,52 @@ function localPlatformChecks({ objs }, params) {
   );
 
   eq(find(objs, 'PeerAuthentication', 'default')?.spec?.mtls?.mode, 'STRICT', `${overlay}: mTLS STRICT`);
-  const principals = (name) =>
-    (find(objs, 'AuthorizationPolicy', name)?.spec?.rules ?? []).map((r) => [
-      r.from?.[0]?.source?.principals,
-      r.to?.[0]?.operation?.ports,
-    ]);
   eq(
-    principals('api'),
+    find(objs, 'AuthorizationPolicy', 'api-require-waypoint')?.spec?.rules?.[0]?.from?.[0]?.source?.principals,
+    ['cluster.local/ns/dx02v2/sa/dx02v2-waypoint'],
+    `${overlay}: API accepts the waypoint identity only`,
+  );
+  eq(
+    find(objs, 'AuthorizationPolicy', 'api-require-waypoint')?.spec?.rules?.[0]?.to?.[0]?.operation?.ports,
+    ['3000', '9464'],
+    `${overlay}: waypoint is required for API and metrics ports`,
+  );
+  const apiPolicy = find(objs, 'AuthorizationPolicy', 'api')?.spec;
+  eq(apiPolicy?.targetRefs, [{ group: '', kind: 'Service', name: 'api' }], `${overlay}: API L7 policy target`);
+  eq(
+    (apiPolicy?.rules ?? []).map((r) => ({
+      principals: r.from?.[0]?.source?.principals,
+      ports: r.to?.[0]?.operation?.ports,
+      paths: r.to?.[0]?.operation?.paths ?? [],
+    })),
     [
-      [['cluster.local/ns/dx02v2/sa/web', 'cluster.local/ns/dx02v2/sa/dx02v2-istio'], ['3000']],
-      [['cluster.local/ns/monitoring/sa/kube-prometheus-stack-prometheus'], ['9464']],
+      {
+        principals: ['cluster.local/ns/dx02v2/sa/web', 'cluster.local/ns/dx02v2/sa/dx02v2-istio'],
+        ports: ['3000'],
+        paths: [],
+      },
+      {
+        principals: ['cluster.local/ns/monitoring/sa/kube-prometheus-stack-prometheus'],
+        ports: ['9464'],
+        paths: [],
+      },
+      {
+        principals: ['cluster.local/ns/monitoring/sa/opentelemetry-collector'],
+        ports: ['3000'],
+        paths: ['/readyz'],
+      },
     ],
     `${overlay}: AuthorizationPolicy api`,
   );
   eq(
-    principals('web'),
+    find(objs, 'AuthorizationPolicy', 'web-require-waypoint')?.spec?.rules?.[0]?.from?.[0]?.source?.principals,
+    ['cluster.local/ns/dx02v2/sa/dx02v2-waypoint'],
+    `${overlay}: web accepts the waypoint identity only`,
+  );
+  const webPolicy = find(objs, 'AuthorizationPolicy', 'web')?.spec;
+  eq(webPolicy?.targetRefs, [{ group: '', kind: 'Service', name: 'web' }], `${overlay}: web L7 policy target`);
+  eq(
+    (webPolicy?.rules ?? []).map((r) => [r.from?.[0]?.source?.principals, r.to?.[0]?.operation?.ports]),
     [[['cluster.local/ns/dx02v2/sa/dx02v2-istio'], ['8080']]],
     `${overlay}: AuthorizationPolicy web`,
   );
@@ -651,9 +833,36 @@ function localPlatformChecks({ objs }, params) {
     ],
     `${overlay}: api -> OpenTelemetry Collector (OTLP/HTTP over HBONE) only`,
   );
+  const gatewayEgress = find(objs, 'NetworkPolicy', 'gateway-egress')?.spec?.egress ?? [];
+  eq(gatewayEgress.length, 3, `${overlay}: Gateway has only waypoint, xDS, and telemetry egress`);
+  eq(
+    gatewayEgress.find(
+      (r) => r.to?.[0]?.podSelector?.matchLabels?.['gateway.networking.k8s.io/gateway-name'] === 'dx02v2-waypoint',
+    ),
+    {
+      to: [{ podSelector: { matchLabels: { 'gateway.networking.k8s.io/gateway-name': 'dx02v2-waypoint' } } }],
+      ports: [{ protocol: 'TCP', port: 15008 }],
+    },
+    `${overlay}: Gateway reaches the waypoint over HBONE`,
+  );
+  eq(
+    gatewayEgress.find(
+      (r) => r.to?.[0]?.namespaceSelector?.matchLabels?.['kubernetes.io/metadata.name'] === 'istio-system',
+    ),
+    {
+      to: [
+        {
+          namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'istio-system' } },
+          podSelector: { matchLabels: { app: 'istiod' } },
+        },
+      ],
+      ports: [{ protocol: 'TCP', port: 15012 }],
+    },
+    `${overlay}: Gateway reaches Istiod for xDS only`,
+  );
   // Every Gateway egress rule that names the Collector: exactly one, OTLP/gRPC (4317) over HBONE (15008).
   eq(
-    (find(objs, 'NetworkPolicy', 'gateway-egress')?.spec?.egress ?? []).filter((r) =>
+    gatewayEgress.filter((r) =>
       (r.to ?? []).some((peer) => JSON.stringify(canonical(peer)) === JSON.stringify(canonical(collector))),
     ),
     [
@@ -695,6 +904,7 @@ function localPlatformChecks({ objs }, params) {
   );
   const hpa = find(objs, 'HorizontalPodAutoscaler', 'api')?.spec;
   eq([hpa?.minReplicas, hpa?.maxReplicas], [2, 4], `${overlay}: HPA`);
+  meshFullChecks(overlay, { objs }, params.API_IMAGE);
 }
 
 const { params, files, localParams } = parseArgs(process.argv.slice(2));
@@ -703,8 +913,8 @@ for (const [overlay, file] of Object.entries(files)) {
   commonChecks(overlay, rendered);
   if (overlay === 'local') {
     localChecks(rendered);
-  } else if (overlay === 'azure' || overlay === 'azure-waf') {
-    azureChecks(overlay, rendered, params, overlay === 'azure-waf');
+  } else if (['azure', 'azure-waf', 'azure-full', 'azure-waf-full'].includes(overlay)) {
+    azureChecks(overlay, rendered, params, overlay.startsWith('azure-waf'));
   } else if (overlay === 'local-platform') {
     check(localParams !== undefined, 'local-platform needs --local-params');
     if (localParams !== undefined) {

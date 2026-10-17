@@ -2,7 +2,8 @@
 # deployment), programmed by its ALB Controller through Gateway API. The AGC resource ID
 # (App Configuration tx02v2/lab/agc/id) goes in the alb-id annotation and the frontend name
 # (tx02v2/lab/agc/frontend-name) in spec.addresses, as in the official AGC how-to guides
-# (verified 2026-10-11). HTTP on port 80 only: HTTPS needs a TLS Secret and is planned.
+# (verified 2026-10-11). Core serves HTTP on port 80; the azure-https component adds the full
+# profile's HTTPS listener, public hostname and HTTP redirect after tx02v2 issues dx02v2-tls.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:

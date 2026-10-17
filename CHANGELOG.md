@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 ### Added
 
+- Contract v4 with public HTTPS in the Azure full overlay: a cert-manager certificate issued by
+  tx02v2, the AGC TLS listener, hostname-scoped app route and HTTP 301 redirect. Core remains an
+  HTTP learning path; neither public issuance nor Azure runtime has been exercised.
+- The full overlay keeps certificate renewal reachable through a solver-only NetworkPolicy from
+  the AGC subnet to port 8089 while the application namespace otherwise defaults to deny.
+
 - R7 DevSecOps gates: CodeQL `security-extended` with SARIF policy, disposable SonarQube Quality
   Gate with an uncovered-code negative fixture, Trivy filesystem and image scans, Gitleaks history
   scan with a negative fixture, and OWASP ZAP Baseline against the disposable Compose app. Reports
@@ -18,8 +24,8 @@ All notable changes to this project are documented here. The format follows
   waits for Argo CD to report that exact revision `Synced` and `Healthy`. Direct push remains
   available through the script when Argo CD is not managing the app; the Actions workflow always
   uses GitOps.
-- Contract version 3 with tx02v2 records the R4 GitOps Application and the deployment path; all 15
-  app configuration keys remain unchanged.
+- Contract version 3 previously recorded the R4 GitOps Application and deployment path. Version 4
+  adds two DNS/ACME keys for the public HTTPS path.
 
 
 ### Security
@@ -28,9 +34,8 @@ All notable changes to this project are documented here. The format follows
   `e2e-platform` and `family-ref` check the integrated infrastructure.
 
 - The smoke test never sends the admin token over plain HTTP to another machine (roadmap R3.17): it
-  is sent over HTTPS or to `127.0.0.1`; on any other plain HTTP entry point, such as the Azure lab
-  (the frontend of the Application Gateway for Containers answers HTTP only), the one call that needs it is skipped (`SKIP` in the
-  output) and `scripts/deploy-azure.sh` does not even read the token.
+  is sent over HTTPS or to `127.0.0.1`. The Azure core profile remains HTTP, and the deployment
+  script does not read the token in either profile; its credentialed call is skipped.
 - `scripts/repo-guardrails.sh` (same file in the six lab repositories, roadmap R3.15 and R3.18) fails
   instead of skipping when it cannot protect the environment `lab`, leaves only `main` in it, reads it
   back, fails when the OIDC subject of the repository is name-based (the cloud trust expects the

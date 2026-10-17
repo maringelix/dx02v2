@@ -40,16 +40,16 @@ A família do lab (v2):
 |---|---|---|
 | Lint, formatação e checagem de tipos (eslint, prettier, tsc para `api` e `web`) | `verificado no CI` | `make static` (`eslint`, `prettier`, `typecheck:*`); job `static` do CI |
 | Dockerfiles, workflows e scripts (hadolint, actionlint, shellcheck) | `verificado no CI` | `make static` (`hadolint`, `actionlint`, `shellcheck`) |
-| Manifests Kubernetes: render do kustomize + kubeconform estrito (local, azure, azure-waf) com schemas de Gateway API e Application Gateway for Containers gerados dos CRDs do ALB Controller fixado, asserções de contrato e de hardening, trivy config | `verificado no CI` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
+| Manifests Kubernetes: render do kustomize + kubeconform estrito (local, Azure core/full, WAF core/full e local-platform) com schemas de Gateway API e Application Gateway for Containers gerados dos CRDs do ALB Controller fixado, asserções de contrato e de hardening, trivy config | `verificado no CI` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
 | Scan de segredos e políticas do repositório (sem identificadores reais nem GUIDs, actions e imagens fixadas, regressões do v1, sem restos do caminho AWS) | `verificado no CI` | `make static` (`gitleaks`, `policy-*`, `repo-structure`, `version-consistency`) |
 | Testes unitários + de integração da API contra um PostgreSQL 17 real (gate de cobertura: linhas >= 80 %, branches >= 70 %) | `verificado no CI` | `make test` (`test:api`); job `test` do CI |
 | Testes da página com Testing Library + jsdom (gate de cobertura: linhas >= 70 %) | `verificado no CI` | `make test` (`test:web`); job `test` do CI |
 | Imagens: build, usuário numérico não root, sem npm nem shell no runtime da API, gate do trivy HIGH/CRITICAL | `verificado no CI` | `make build`; job `images` do CI |
 | Gates DevSecOps: SARIF do CodeQL, Quality Gate do SonarQube, scans de filesystem e imagem do Trivy, histórico e fixture negativa do Gitleaks, OWASP ZAP Baseline | `verificado no CI` | jobs `static`, `test`, `images`; `make dast`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
-| Cadeia de release: reutiliza IDs das imagens testadas no CI, publica por digest com SBOM SPDX e attestations Sigstore, valida antes da promoção para ACR e do deploy via Argo CD | `workflow implementado; release ainda não publicado` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
+| Cadeia de release: reutiliza IDs das imagens testadas no CI, publica por digest com SBOM SPDX e attestations Sigstore, valida antes da promoção ABAC para ACR, atesta os digests promovidos e exige assinatura no perfil full | `workflow implementado; release ainda não publicado` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
 | Stack do compose (PostgreSQL → migrate → api → web em 127.0.0.1) + smoke test | `verificado localmente` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, fora do CI) |
 | Ponta a ponta no kind: Pod Security `restricted`, smoke test pelo nginx, enforcement de NetworkPolicy | `verificado no CI` | `make e2e` (`scripts/e2e-kind.sh`); job `e2e` do CI |
-| Deploy na Azure (ACR, AKS do tx02v2, ExternalSecrets do Key Vault, Application Gateway for Containers + política de WAF, traces para o OpenTelemetry Collector e o Application Insights, smoke test; workflow com GitOps do Argo CD, push direto pelo script como alternativa) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
+| Deploy na Azure (ACR, AKS do tx02v2, ExternalSecrets, Application Gateway for Containers + WAF, OpenTelemetry e perfil full opcional com malha ambient/canário; inputs `core|full` e `auto|gitops|push`) | `não executado em nuvem (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
 | HTTPS no listener do Application Gateway for Containers | `planejado` | precisa de um Secret TLS; fora do contrato v2 (`docs/CONTRATO.md`) |
 | Configurações do repositório como código (ruleset, environment `lab`) | `verificado localmente` | `scripts/repo-guardrails.sh` aplicado; conferido com `gh api` em 2026-10-14 (`docs/PUBLICACAO.md`) |
 | Overlay `local-platform` para o lab local do tx02v2: render do kustomize + kubeconform estrito, asserções contra o contrato local e os kinds do AppProject `dx02v2`, cinco regras de alerta testadas com promtool | `verificado no CI` | `make static` (`kubeconform`, `contract-app`, `promtool-rules`) num contêiner Linux; job `static` do CI |
@@ -82,8 +82,9 @@ flowchart LR
   API e `/` para o web pela Gateway API; ele acrescenta o endereço do cliente ao `X-Forwarded-For`,
   então continua havendo exatamente um salto confiável. Os segredos vêm do Key Vault pelo External
   Secrets; namespace, identidades, AGC, PostgreSQL e camada de plataforma são do tx02v2. O workflow
-  publica a revisão na branch `gitops/azure` para o Argo CD; o script também aceita push direto para
-  clusters sem Argo CD, enquanto o workflow do Actions usa sempre GitOps.
+  pode publicar a revisão na branch `gitops/azure` para o Argo CD ou aplicar diretamente. Em `auto`,
+  escolhe GitOps quando encontra a Application; o workflow também aceita `gitops` e `push`. O input
+  `platform_profile=full` ativa o waypoint e o exercício de canário.
 - Decisões de design, diagramas por ambiente e as tabelas dx01v2 ↔ dx02v2 e v1 → v2:
   [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
@@ -123,7 +124,7 @@ confira o [documento de custos do tx02v2](https://github.com/maringelix/tx02v2/b
 e a calculadora oficial. Use uma assinatura dedicada com orçamento e destrua no mesmo dia.
 
 Siga o [docs/RUNBOOK.md](docs/RUNBOOK.md): bootstrap/apply/plataforma do tx02v2 → variáveis do
-GitHub do dx02v2 → workflow `deploy-azure` (GitOps com Argo CD) → smoke
+GitHub do dx02v2 → workflow `deploy-azure` (core/full, auto/GitOps/push) → smoke
 test pelo Application Gateway for Containers → destroy do tx02v2 + checagem de sobras → issue
 `cloud_run_report`.
 

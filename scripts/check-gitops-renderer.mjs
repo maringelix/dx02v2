@@ -18,7 +18,7 @@ const manifests = parseAllDocuments(readFileSync(manifestsFile, 'utf8'))
   .map((doc) => doc.toJS())
   .filter(Boolean);
 const source = document.spec?.source;
-if (typeof source?.path !== 'string' || !/^deploy\/k8s\/overlays\/(azure|azure-waf)$/.test(source.path)) {
+if (typeof source?.path !== 'string' || !/^deploy\/k8s\/overlays\/(azure|azure-waf)(-full)?$/.test(source.path)) {
   fail(`unexpected source path: ${source?.path}`);
 }
 

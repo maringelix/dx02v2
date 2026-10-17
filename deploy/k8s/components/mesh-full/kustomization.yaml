@@ -1,0 +1,80 @@
+# Reusable lab-only route, backends and identity policy for full profiles. The Azure cloud overlay
+# and tx02v2's local-platform overlay supply the deploy-params ConfigMap used for the approved API image.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dx02v2
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - mesh-demo.yaml
+  - mesh-policy.yaml
+  - mesh-route.yaml
+patches:
+  # Full-profile east-west traffic reaches app Services through the namespace waypoint. Tighten the
+  # base rules so the L4 network path cannot connect directly to API pods.
+  - target:
+      kind: NetworkPolicy
+      name: web-egress-to-api
+    patch: |-
+      - op: replace
+        path: /spec/egress
+        value:
+          - to:
+              - podSelector:
+                  matchLabels:
+                    gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+            ports:
+              - protocol: TCP
+                port: 15008
+  - target:
+      kind: NetworkPolicy
+      name: api-ingress-from-web
+    patch: |-
+      - op: replace
+        path: /spec/ingress
+        value:
+          - from:
+              - podSelector:
+                  matchLabels:
+                    gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+            ports:
+              - protocol: TCP
+                port: 15008
+          - from:
+              - ipBlock:
+                  cidr: 169.254.7.127/32
+            ports:
+              - protocol: TCP
+                port: 3000
+  - target:
+      kind: NetworkPolicy
+      name: api-metrics-from-monitoring
+    patch: |-
+      - op: replace
+        path: /spec/ingress
+        value:
+          - from:
+              - podSelector:
+                  matchLabels:
+                    gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+            ports:
+              - protocol: TCP
+                port: 15008
+replacements:
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.API_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: mesh-stable
+        fieldPaths:
+          - spec.template.spec.containers.[name=main].image
+      - select:
+          kind: Deployment
+          name: mesh-canary
+        fieldPaths:
+          - spec.template.spec.containers.[name=main].image

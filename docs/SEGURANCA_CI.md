@@ -77,15 +77,18 @@ emissor https://token.actions.githubusercontent.com, ref main, SHA do source e r
 O job prova que um artefato sem attestation, um workflow diferente, um emissor diferente e um SHA de
 source diferente falham. O manifesto e os arquivos SPDX ficam no Actions por 90 dias.
 
-O workflow deploy-azure recebe o ID da publicacao e, antes de solicitar aprovacao do environment lab,
-confere de novo o publisher, a execucao CI, seus cinco checks, os hashes dos SBOMs e as attestations.
-Depois da aprovacao importa os digests verificados do GHCR para o ACR sem rebuild, valida o digest e
-o image ID e publica os manifests por digest no Argo CD. A verificacao do bundle nao configura nem
-altera contas cloud.
+O workflow `deploy-azure` recebe o ID da publicacao e, antes de solicitar aprovacao do environment
+`lab`, confere de novo o publisher, a execucao CI, seus cinco checks, os hashes dos SBOMs e as
+attestations. Depois da aprovacao, envia a imagem verificada do GHCR ao ACR sem rebuild, usando
+`Container Registry Repository Writer` com condicao ABAC separada para `dx02v2/api` e `dx02v2/web`.
+O script consulta somente a tag completa do commit; nao precisa listar o catalogo do registry. Ele
+confere o image ID no ACR e recusa sobrescrever uma tag com outra imagem.
 
-A importacao do ACR exige `Container Registry Data Importer and Data Reader` na identidade de deploy;
-`AcrPush` nao cobre a operacao de import. O PR R8 do tx02v2 deve conceder esse papel no mesmo escopo
-do registry e remover `AcrPush`, preservando somente a leitura necessaria e a importacao controlada.
+O workflow entao assina uma attestation de promocao para cada digest no ACR. O predicate vincula o
+repositorio, o commit, o digest de origem do GHCR e o digest publicado no ACR. O perfil full verifica
+essa assinatura com Kyverno antes de admitir os pods. O digest do manifesto OCI pode mudar na
+transferencia entre registries; a identidade da imagem e conferida pelo image ID, e a attestation
+passa a proteger o digest final do ACR. A verificacao do bundle nao configura nem altera contas cloud.
 
 
 ## Aula: provar que o gate bloqueia

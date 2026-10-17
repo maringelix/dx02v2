@@ -39,17 +39,17 @@ The lab family (v2):
 |---|---|---|
 | Lint, formatting and type checks (eslint, prettier, tsc for `api` and `web`) | `verified in CI` | `make static` (`eslint`, `prettier`, `typecheck:*`); CI job `static` |
 | Dockerfiles, workflows and scripts (hadolint, actionlint, shellcheck) | `verified in CI` | `make static` (`hadolint`, `actionlint`, `shellcheck`) |
-| Kubernetes manifests: kustomize render + kubeconform strict (local, azure, azure-waf) with Gateway API and Application Gateway for Containers schemas generated from the pinned ALB Controller CRDs, contract and hardening assertions, trivy config | `verified in CI` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
+| Kubernetes manifests: kustomize render + kubeconform strict (local, Azure core/full, WAF core/full, and local-platform) with Gateway API and Application Gateway for Containers schemas generated from the pinned ALB Controller CRDs, contract and hardening assertions, trivy config | `verified in CI` | `make static` (`crd-schemas`, `kubeconform`, `contract-app`, `trivy-config`) |
 | Secret scan and repository policies (no real identifiers or GUIDs, pinned actions and images, v1 regressions, no leftovers of the AWS path) | `verified in CI` | `make static` (`gitleaks`, `policy-*`, `repo-structure`, `version-consistency`) |
 | API unit + integration tests against a real PostgreSQL 17 (coverage gate: lines >= 80 %, branches >= 70 %) | `verified in CI` | `make test` (`test:api`); CI job `test` |
 | Web tests with Testing Library + jsdom (coverage gate: lines >= 70 %) | `verified in CI` | `make test` (`test:web`); CI job `test` |
 | Images: build, numeric non-root user, no npm or shell in the API runtime, trivy HIGH/CRITICAL gate | `verified in CI` | `make build`; CI job `images` |
 | DevSecOps gates: CodeQL SARIF, SonarQube Quality Gate, Trivy filesystem and image scans, Gitleaks history and negative fixture, OWASP ZAP Baseline | `verified in CI` | CI jobs `static`, `test`, `images`; `make dast`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
-| Release supply chain: reuse CI-tested image IDs, publish by digest with SPDX SBOMs and Sigstore attestations, verify before ACR promotion and Argo CD deploy | `workflow implemented; release not yet published` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
+| Release supply chain: reuse CI-tested image IDs, publish by digest with SPDX SBOMs and Sigstore attestations, verify before repo-scoped ACR promotion, attest the promoted digests and enforce the signature in the full profile | `workflow implemented; release not yet published` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
 | Compose stack (PostgreSQL → migrate → api → web on 127.0.0.1) + smoke test | `verified locally` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, not part of CI) |
 | kind end-to-end: Pod Security `restricted`, smoke test through nginx, NetworkPolicy enforcement | `verified in CI` | `make e2e` (`scripts/e2e-kind.sh`); CI job `e2e` |
-| Azure deploy (ACR, AKS of tx02v2, ExternalSecrets, Application Gateway for Containers + WAF, traces to the OpenTelemetry Collector and Application Insights, smoke test; the workflow uses Argo CD GitOps, with direct push available through the script) | `not run in the cloud (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
-| HTTPS on the Application Gateway for Containers listener | `planned` | needs a TLS Secret; outside contract v2 (`docs/CONTRATO.md`) |
+| Azure deploy (ACR, AKS of tx02v2, ExternalSecrets, Application Gateway for Containers + WAF, OpenTelemetry, optional ambient mesh/canary full profile; inputs select `core|full` and `auto|gitops|push`) | `not run in the cloud (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
+| HTTPS on AGC in the full profile, with HTTP redirect and the tx02v2 ACME certificate | `implemented; not run in the cloud (v2)` | `deploy/k8s/components/azure-https`, `docs/CONTRATO.md` |
 | Repository settings as code (ruleset, environment `lab`) | `verified locally` | `scripts/repo-guardrails.sh` applied; read back with `gh api` on 2026-10-14 (`docs/PUBLICACAO.md`) |
 | Overlay `local-platform` for the tx02v2 local lab: kustomize render + kubeconform strict, assertions against the local contract and the kinds of the AppProject `dx02v2`, five alert rules tested with promtool | `verified in CI` | `make static` (`kubeconform`, `contract-app`, `promtool-rules`) in a Linux container; CI job `static` |
 | **The app on the full local platform of tx02v2** (kind + emulated ACR, PostgreSQL Flexible Server, object storage, load balancer, git server): images to the lab registry, GitOps with Argo CD (Synced, Healthy, self-heal) | `verified in CI` | `make e2e-platform` (`scripts/deploy-local.sh`, `scripts/e2e-platform.sh`, `docs/LAB_LOCAL.md`); CI job `e2e-platform` |
@@ -81,8 +81,9 @@ flowchart LR
   and `/` to the web through Gateway API; it appends the client address to `X-Forwarded-For`, so
   there is still exactly one trusted hop. Secrets come from Key Vault through External Secrets; the
   namespace, identities, AGC, PostgreSQL and the platform layer belong to tx02v2. The deploy
-  workflow publishes the source revision to `gitops/azure` for Argo CD; the script also supports
-  direct push for clusters without Argo CD, while the Actions workflow always uses GitOps.
+  workflow can publish the source revision to `gitops/azure` for Argo CD or apply directly. In
+  `auto` mode it selects GitOps when the Application exists; the workflow input also supports
+  explicit `gitops` and `push`. `platform_profile=full` enables the waypoint and canary exercise.
 - Design decisions, diagrams per environment, the dx01v2 ↔ dx02v2 and v1 → v2 tables:
   [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
@@ -122,7 +123,7 @@ AKS nodes and PostgreSQL. Reference list prices from the Azure Retail Prices API
 and the official calculator. Use a dedicated subscription with a budget and destroy on the same day.
 
 Follow [docs/RUNBOOK.md](docs/RUNBOOK.md): tx02v2 bootstrap/apply/platform → GitHub variables of
-dx02v2 → `deploy-azure` workflow (Argo CD GitOps) → smoke test
+dx02v2 → `deploy-azure` workflow (core/full, auto/GitOps/push) → smoke test
 through Application Gateway for Containers → tx02v2 destroy + leftover check → `cloud_run_report`
 issue.
 

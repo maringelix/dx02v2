@@ -9,7 +9,7 @@ K8S_LOCAL_PARAMS_EXAMPLE="$K8S_DIR/components/local-platform/params.example.env"
 # shellcheck disable=SC2034 # used by the scripts that source this file
 K8S_SCHEMA_DIR="$K8S_DIR/schemas"
 # shellcheck disable=SC2034
-K8S_OVERLAYS=(local azure azure-waf local-platform)
+K8S_OVERLAYS=(local azure azure-waf azure-full azure-waf-full local-platform)
 
 # Formats accepted for every deploy parameter of the local-platform overlay (values come from the
 # ConfigMap lab-system/lab-contract of the tx02v2 local lab).
@@ -24,12 +24,14 @@ declare -A K8S_LOCAL_PARAM_PATTERN=(
 # Formats accepted for every deploy parameter (values come from App Configuration, docs/CONTRATO.md).
 K8S_GUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 K8S_AZURE_NAME='[A-Za-z0-9][A-Za-z0-9_.-]{0,79}'
+K8S_DNS_LABEL='[a-z0-9]([a-z0-9-]*[a-z0-9])?'
 # shellcheck disable=SC2034 # read through a nameref in k8s_validate_params
 declare -A K8S_PARAM_PATTERN=(
   [API_IMAGE]='^tx02v2lab[0-9a-f]{8}\.azurecr\.io/dx02v2/api(:[0-9a-f]{40}|@sha256:[0-9a-f]{64})$'
   [WEB_IMAGE]='^tx02v2lab[0-9a-f]{8}\.azurecr\.io/dx02v2/web(:[0-9a-f]{40}|@sha256:[0-9a-f]{64})$'
   [AGC_ID]="^/subscriptions/$K8S_GUID/[Rr]esource[Gg]roups/tx02v2-lab/providers/Microsoft\.[Ss]ervice[Nn]etworking/[Tt]raffic[Cc]ontrollers/$K8S_AZURE_NAME\$"
   [AGC_FRONTEND]="^$K8S_AZURE_NAME\$"
+  [DNS_HOSTNAME]="^(disabled|${K8S_DNS_LABEL}(\\.${K8S_DNS_LABEL})+)\$"
   [WAF_POLICY_ID]="^(none|/subscriptions/$K8S_GUID/[Rr]esource[Gg]roups/tx02v2-lab/providers/Microsoft\.[Nn]etwork/[Aa]pplication[Gg]ateway[Ww]eb[Aa]pplication[Ff]irewall[Pp]olicies/$K8S_AZURE_NAME)\$"
   # Application Gateway for Containers with Azure CNI Overlay requires exactly a /24 subnet.
   [AGC_SUBNET_CIDR]='^([0-9]{1,3}\.){3}[0-9]{1,3}/24$'

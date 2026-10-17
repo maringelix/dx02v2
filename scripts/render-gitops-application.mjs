@@ -43,8 +43,15 @@ function image(value, key) {
 }
 
 const [cloud, overlay, actualFile, exampleFile] = process.argv.slice(2);
-if (cloud !== 'azure' || !['azure', 'azure-waf'].includes(overlay) || !actualFile || !exampleFile) {
-  fail('usage: render-gitops-application.mjs azure <azure|azure-waf> <actual params.env> <params.example.env>');
+if (
+  cloud !== 'azure' ||
+  !['azure', 'azure-waf', 'azure-full', 'azure-waf-full'].includes(overlay) ||
+  !actualFile ||
+  !exampleFile
+) {
+  fail(
+    'usage: render-gitops-application.mjs azure <azure|azure-waf|azure-full|azure-waf-full> <actual params.env> <params.example.env>',
+  );
 }
 
 const actual = readEnv(actualFile);
@@ -86,7 +93,7 @@ addPatch(
   '/spec/egress/0/to/0/ipBlock/cidr',
   required(actual, 'POSTGRES_SUBNET_CIDR'),
 );
-if (overlay === 'azure-waf') {
+if (overlay === 'azure-waf' || overlay === 'azure-waf-full') {
   addPatch(
     'WebApplicationFirewallPolicy',
     'dx02v2',
