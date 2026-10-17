@@ -108,9 +108,10 @@ workflow confere o formato antes de tudo e o `azure/login` mascara o client ID).
 | `AZURE_SUBSCRIPTION_ID` | `00000000-0000-0000-0000-000000000000` | assinatura do lab (precisa ser a do `agc/id` da App Configuration) |
 | `AZURE_APPCONFIG_ENDPOINT` | `https://tx02v2-lab-00000000.azconfig.io` | endpoint do store do contrato (output do tx02v2) |
 
-Papéis Azure do principal que faz o deploy (o tx02v2 atribui à `dx02v2-gha-deploy`): `AcrPush` no
-registry, `Azure Kubernetes Service Cluster User Role` no cluster e `App Configuration Data Reader` no
-store. A partir de um laptop, o seu usuário precisa dos mesmos três papéis: o tx02v2 os atribui a
+Papéis Azure do principal que faz o deploy (o tx02v2 atribui à `dx02v2-gha-deploy`): `Container
+Registry Repository Writer` com condições ABAC para os dois repositórios do app, `Azure Kubernetes
+Service Cluster User Role` no cluster e `App Configuration Data Reader` no store. A partir de um
+laptop, o seu usuário precisa dos mesmos papéis: o tx02v2 os atribui a
 cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/CONTRATO.md`).
 
 ## 7. Deploy
@@ -119,21 +120,28 @@ Primeiro, publique um release a partir de `main`: abra `publish-images`, informe
 bem-sucedida do `ci.yml` para o mesmo SHA de `main`, e aguarde a publicação dos digests assinados.
 Depois, abra `deploy-azure`, escolha `main` e informe o ID da execução `publish-images`. O workflow
 valida o CI de origem, os SBOMs e as attestations antes de solicitar aprovação do environment `lab`;
-após a aprovação, valida tudo novamente antes de pedir credenciais Azure. O deploy usa GitOps e exige
-o perfil `full` do tx02v2, a Application `dx02v2` no Argo CD e permissão para publicar `gitops/azure`.
-O deploy por import exige `Container Registry Data Importer and Data Reader` no ACR; essa permissão
-least-privilege será entregue junto ao contrato no PR R8 do tx02v2. A homologação cloud ocorre depois
-da integração dos 22 PRs.
+após a aprovação, valida tudo novamente antes de pedir credenciais Azure. Escolha `platform_profile`
+como `core` ou `full` e `deploy_mode` como `auto`, `gitops` ou `push`. `auto` usa GitOps quando encontra
+a Application `dx02v2`; se ela não existe, aplica o overlay diretamente. Falhas de permissão ou de
+conexão com o Argo CD não são tratadas como ausência. O perfil `full` exige a plataforma full do
+tx02v2, o waypoint ambient e a policy de assinatura; o workflow promove e atesta as imagens do ACR
+antes de iniciar o deploy. A homologação cloud ocorre depois da integração dos 22 PRs.
 
-O script `scripts/deploy-azure.sh`:
+O job `deploy-azure` primeiro promove as imagens verificadas para o ACR, gera e verifica uma attestation
+que vincula os digests de origem e destino; depois chama o script de deploy. O script
+`scripts/deploy-azure.sh`:
 
 1. valida a execução de publicação, o CI de origem, os cinco checks obrigatórios, os hashes dos SBOMs e as attestations de provenance e SPDX;
-2. lê as 15 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos e formatos;
+2. lê as 17 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos, DNS e formatos;
 3. obtém kubeconfig temporário e confere API groups e RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
-4. importa os digests assinados do GHCR para o ACR sem reconstruir as imagens; confere que os digests e image IDs permanecem iguais e recusa substituir uma tag SHA por conteúdo diferente;
-5. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas, renderiza e valida o overlay `azure-waf` ou `azure`, configura os valores reais na Application e publica o commit com `params.env` de exemplo em `gitops/azure` (ou aplica com `DEPLOY_MODE=push`);
+4. confere a imagem GHCR com o release, envia a mesma imagem ao ACR sem rebuild, valida o image ID e recusa substituir uma tag SHA por outra imagem;
+5. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas, renderiza e valida `azure`, `azure-waf`, `azure-full` ou `azure-waf-full`, configura os valores reais em `spec.source.kustomize` e publica a revisão em `gitops/azure` (ou aplica direto no modo `push`);
 6. espera a Application estar `Synced` e `Healthy` no commit publicado, os ExternalSecrets e rollouts, e confere os digests nos Deployments;
-7. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. Como o frontend só fala HTTP, o token de admin não é lido nem enviado.
+7. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. No perfil full, usa o hostname HTTPS público e confere o redirect HTTP 301. No core, usa o FQDN HTTP do frontend. O token de admin não é lido nem enviado pelo script.
+
+No perfil `full`, a rota interna `mesh-demo` demonstra divisão de tráfego 80/20 entre `mesh-stable`
+e `mesh-canary`, retries limitados e ejeção do canário após falhas. O job de deploy não executa essa
+sonda automaticamente; acompanhe os logs do app e os checks do `tx02v2` para estudar a malha.
 
 Para executar manualmente de um laptop, obtenha e extraia o artefato do release e configure
 `RELEASE_DIR`, `RELEASE_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_ACTOR` e um `GH_TOKEN` com permissões
@@ -144,7 +152,9 @@ Para executar manualmente de um laptop, obtenha e extraia o artefato do release 
     printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
     AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
 
-Sem Argo CD, use `DEPLOY_MODE=push AZURE_APPCONFIG_ENDPOINT=... scripts/deploy-azure.sh`.
+Sem Argo CD, use `DEPLOY_MODE=push AZURE_APPCONFIG_ENDPOINT=... scripts/deploy-azure.sh`. Para
+implantar manualmente no perfil full, use apenas digests que já tenham a attestation de promoção
+assinada pelo workflow em `main`; a execução manual do script não cria essa assinatura.
 
 ## 8. Conferir
 
@@ -179,7 +189,7 @@ cobrando).
 | `AADSTS700024: Client assertion is not within its valid time range` | o token OIDC do GitHub expirou antes de o `az` obter um token novo | rode o workflow de novo; não coloque passos lentos entre o `azure/login` e o deploy |
 | `the cluster does not serve ...` | camada de plataforma do tx02v2 não instalada | rode o workflow de plataforma do tx02v2 |
 | `this principal cannot deploy to namespace dx02v2 (...)` | sem RoleBinding `dx02v2-deployers` para este object ID, ou regra faltando na Role | confira a plataforma do tx02v2; a Role usa os plurais dos CRDs do AGC, `healthcheckpolicy` e `webapplicationfirewallpolicy` (`docs/CONTRATO.md`) |
-| `docker login to ... failed` | sem `AcrPush` no registry | papéis da seção 6 |
+| `docker login to ... failed` | sem Repository Writer para `dx02v2/api` e `dx02v2/web` | papéis da seção 6 |
 | `refusing https://...: SHA-1 thumbprint ...` | a raiz baixada não é a do contrato | pare: confira a página "Azure Certificate Authority details"; mudar a raiz é mudança de contrato |
 | ExternalSecret não fica `Ready` | ClusterSecretStore, identidade do ESO ou segredo ausente | `kubectl -n dx02v2 describe externalsecret db-credentials`; confira a plataforma do tx02v2 |
 | initContainer `migrate` falha com erro de TLS | ConfigMap `azure-pg-ca` ausente, ou `host` do segredo não é o FQDN do servidor | o script recria o ConfigMap; confira o `host` em `tx02v2-lab-db-app` |

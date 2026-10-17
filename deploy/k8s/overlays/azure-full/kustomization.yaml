@@ -1,0 +1,13 @@
+# AKS lab cluster of tx02v2 with the full platform profile (ambient waypoint, signed image policy,
+# durable observability and chaos). Rendered and applied by scripts/deploy-azure.sh from a temporary
+# copy that contains components/azure/params.env.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dx02v2
+resources:
+  - ../../base
+  - gitops-revision.yaml
+components:
+  - ../../components/azure
+  - ../../components/azure-https
+  - ../../components/mesh-full

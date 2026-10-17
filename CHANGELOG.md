@@ -5,7 +5,31 @@ All notable changes to this project are documented here. The format follows
 [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
+### Fixed
+
+- Keep pod-IP metrics scraping reachable only to the authenticated Prometheus identity on port
+  9464, while API traffic still requires the waypoint. The Collector's synthetic web probe is
+  limited to GET /healthz. Manifest checks enforce both narrow exceptions.
+
+- The Azure platform exercise uses the merged local waypoint setup and now runs the same advanced
+  mesh probe as AWS and Google Cloud: identity restrictions, weighted traffic, timeout and bounded
+  retry behavior are exercised through the programmed waypoint.
+
+- Permit the generated Istio waypoint to accept HBONE under namespace default-deny, with egress
+  limited to the app, mesh demo, control plane and telemetry. L7 identity/HTTP policies still apply.
+
+- The platform rollback exercise keeps its mesh demo on the tested R8 API image while the previous
+  application artifact is deployed. Strict manifest validation now uses the SHA256-pinned experimental
+  Gateway API 1.6.3 schema for the full profile's bounded retries and the ALB Controller schemas for
+  the core ingress path.
+
 ### Added
+
+- Contract v4 with public HTTPS in the Azure full overlay: a cert-manager certificate issued by
+  tx02v2, the AGC TLS listener, hostname-scoped app route and HTTP 301 redirect. Core remains an
+  HTTP learning path; neither public issuance nor Azure runtime has been exercised.
+- The full overlay keeps certificate renewal reachable through a solver-only NetworkPolicy from
+  the AGC subnet to port 8089 while the application namespace otherwise defaults to deny.
 
 - R7 DevSecOps gates: CodeQL `security-extended` with SARIF policy, disposable SonarQube Quality
   Gate with an uncovered-code negative fixture, Trivy filesystem and image scans, Gitleaks history
@@ -18,8 +42,8 @@ All notable changes to this project are documented here. The format follows
   waits for Argo CD to report that exact revision `Synced` and `Healthy`. Direct push remains
   available through the script when Argo CD is not managing the app; the Actions workflow always
   uses GitOps.
-- Contract version 3 with tx02v2 records the R4 GitOps Application and the deployment path; all 15
-  app configuration keys remain unchanged.
+- Contract version 3 previously recorded the R4 GitOps Application and deployment path. Version 4
+  adds two DNS/ACME keys for the public HTTPS path.
 
 
 ### Security
@@ -28,9 +52,8 @@ All notable changes to this project are documented here. The format follows
   `e2e-platform` and `family-ref` check the integrated infrastructure.
 
 - The smoke test never sends the admin token over plain HTTP to another machine (roadmap R3.17): it
-  is sent over HTTPS or to `127.0.0.1`; on any other plain HTTP entry point, such as the Azure lab
-  (the frontend of the Application Gateway for Containers answers HTTP only), the one call that needs it is skipped (`SKIP` in the
-  output) and `scripts/deploy-azure.sh` does not even read the token.
+  is sent over HTTPS or to `127.0.0.1`. The Azure core profile remains HTTP, and the deployment
+  script does not read the token in either profile; its credentialed call is skipped.
 - `scripts/repo-guardrails.sh` (same file in the six lab repositories, roadmap R3.15 and R3.18) fails
   instead of skipping when it cannot protect the environment `lab`, leaves only `main` in it, reads it
   back, fails when the OIDC subject of the repository is name-based (the cloud trust expects the

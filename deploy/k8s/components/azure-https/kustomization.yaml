@@ -1,0 +1,78 @@
+# The tx02v2 full installer has already issued dx02v2-tls through an HTTP-only AGC Gateway.
+# Add its HTTPS listener, route the app on HTTPS, and redirect port 80. The more specific
+# cert-manager HTTP-01 challenge route can still answer future renewals on port 80.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dx02v2
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - redirect.yaml
+  - acme-networkpolicy.yaml
+patches:
+  - target:
+      kind: Gateway
+      name: dx02v2
+    patch: |-
+      - op: add
+        path: /spec/listeners/0/hostname
+        value: replaced-from-deploy-params
+      - op: add
+        path: /spec/listeners/-
+        value:
+          name: https
+          hostname: replaced-from-deploy-params
+          protocol: HTTPS
+          port: 443
+          tls:
+            mode: Terminate
+            certificateRefs:
+              - name: dx02v2-tls
+          allowedRoutes:
+            namespaces:
+              from: Same
+  - target:
+      kind: HTTPRoute
+      name: dx02v2
+    patch: |-
+      - op: replace
+        path: /spec/parentRefs/0/sectionName
+        value: https
+      - op: add
+        path: /spec/hostnames
+        value:
+          - replaced-from-deploy-params
+replacements:
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.DNS_HOSTNAME
+    targets:
+      - select:
+          kind: Gateway
+          name: dx02v2
+        fieldPaths:
+          - spec.listeners.0.hostname
+          - spec.listeners.1.hostname
+      - select:
+          kind: HTTPRoute
+          name: dx02v2
+        fieldPaths:
+          - spec.hostnames.0
+      - select:
+          kind: HTTPRoute
+          name: dx02v2-http-redirect
+        fieldPaths:
+          - spec.hostnames.0
+  - source:
+      kind: ConfigMap
+      name: deploy-params
+      fieldPath: data.AGC_SUBNET_CIDR
+    targets:
+      - select:
+          kind: NetworkPolicy
+          name: acme-solver-ingress-from-agc
+        fieldPaths:
+          - spec.ingress.0.from.0.ipBlock.cidr

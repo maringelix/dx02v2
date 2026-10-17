@@ -1,0 +1,157 @@
+# The generated waypoint pod is selected by the namespace default-deny policy. Its ClusterIP HBONE
+# listener accepts ingress-Gateway and ztunnel traffic; Istio AuthorizationPolicies authenticate
+# original clients at L7. Its egress stays limited to backends, istiod and telemetry.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: waypoint-traffic
+spec:
+  podSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 15008
+    - from:
+        - ipBlock:
+            cidr: 169.254.7.127/32
+      ports:
+        - protocol: TCP
+          port: 15021
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [api, web, mesh-demo]
+      ports:
+        - protocol: TCP
+          port: 15008
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              app: istiod
+      ports:
+        - protocol: TCP
+          port: 15012
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+      ports:
+        - protocol: TCP
+          port: 15008
+        - protocol: TCP
+          port: 4317
+---
+# ztunnel and the CNI allow only the waypoint HBONE path to the demo backends. The Azure CNI
+# probe exception is narrow and does not expose the HTTP service to other workloads.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mesh-demo-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mesh-demo
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+      ports:
+        - protocol: TCP
+          port: 15008
+    - from:
+        - ipBlock:
+            cidr: 169.254.7.127/32
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mesh-probe-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mesh-probe
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+      ports:
+        - protocol: TCP
+          port: 15008
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mesh-intruder-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mesh-intruder
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
+      ports:
+        - protocol: TCP
+          port: 15008
+---
+# Waypoint-bound L7 policy. A second L4 policy limits direct access to the backend pods to the
+# waypoint identity, so an unavailable/misconfigured waypoint cannot silently bypass this policy.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: mesh-demo
+spec:
+  targetRefs:
+    - group: ''
+      kind: Service
+      name: mesh-demo
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/dx02v2/sa/mesh-probe
+      to:
+        - operation:
+            ports: ['3000']
+            methods: [GET]
+            paths: ['/variant', '/fail', '/healthz']
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: mesh-demo-require-waypoint
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mesh-demo
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/dx02v2/sa/dx02v2-waypoint
+      to:
+        - operation:
+            ports: ['3000']

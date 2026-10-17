@@ -4,6 +4,12 @@ O harness é o conjunto de checks que prova o que este repositório afirma, sem 
 Ele vive em `scripts/harness.sh`; o `Makefile` e o CI só o chamam. O que passa localmente com
 `HARNESS_STRICT=1` passa no CI.
 
+No perfil `full` e no overlay `local-platform`, o check `kubeconform` valida os `HTTPRoute` contra
+o bundle experimental Gateway API v1.6.3, conferido pelo SHA256 em
+`deploy/k8s/schemas/source.env`. Os overlays de entrada `azure` e `azure-waf` continuam usando os
+schemas gerados dos CRDs do ALB Controller. O campo `retry` do waypoint só existe no canal
+experimental.
+
 ## Camadas
 
 | Camada | Comando | O que prova | O que NÃO prova | Onde roda |

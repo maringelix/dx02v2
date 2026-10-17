@@ -2,7 +2,7 @@
 # as HBONE on port 15008 of the destination pod (ztunnel), and kubelet probes arrive from the
 # link-local address 169.254.7.127 (https://istio.io/latest/docs/ambient/usage/networkpolicy/): both
 # have to be allowed next to the application ports. The Gateway pods (created by Istio for the Gateway
-# dx02v2) are not in the mesh themselves; they send HBONE to the app pods.
+# dx02v2) are not in the mesh themselves; ingress-use-waypoint sends their traffic to the waypoint.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -38,19 +38,8 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
       ports:
-        - protocol: TCP
-          port: 3000
-        - protocol: TCP
-          port: 15008
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: web
-      ports:
-        - protocol: TCP
-          port: 8080
         - protocol: TCP
           port: 15008
     # Configuration (xDS) and certificates from istiod.
@@ -82,6 +71,28 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: api-metrics-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  policyTypes: [Ingress]
+  ingress:
+    # ServiceMonitor discovers pod IPs. The authenticated Prometheus identity can use only 9464.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 15008
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: api-ingress-mesh
 spec:
   podSelector:
@@ -92,23 +103,10 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: web
-        - podSelector:
-            matchLabels:
-              gateway.networking.k8s.io/gateway-name: dx02v2
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
       ports:
         - protocol: TCP
           port: 15008
-    - from:
-        - podSelector:
-            matchLabels:
-              gateway.networking.k8s.io/gateway-name: dx02v2
-      ports:
-        - protocol: TCP
-          port: 3000
     - from:
         - ipBlock:
             cidr: 169.254.7.127/32
@@ -129,10 +127,8 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              gateway.networking.k8s.io/gateway-name: dx02v2
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
       ports:
-        - protocol: TCP
-          port: 8080
         - protocol: TCP
           port: 15008
     - from:
@@ -155,7 +151,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: api
+              gateway.networking.k8s.io/gateway-name: dx02v2-waypoint
       ports:
         - protocol: TCP
           port: 15008
@@ -185,7 +181,7 @@ spec:
         - protocol: TCP
           port: 15008
 ---
-# The database of the local lab (the local twin of the PostgreSQL Flexible Server), on the lab network.
+# The database of the local lab, on the lab network.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -81,7 +81,7 @@ flowchart LR
   gw -.->|"programa"| fe
   api -->|"TLS verify-full (ConfigMap azure-pg-ca)"| pg[("PostgreSQL Flexible Server 17<br/>subnet delegada, privado")]
   kv["Key Vault"] --> eso
-  gha["deploy-azure (OIDC, workflow_dispatch)"] -->|"App Configuration, ACR, branch gitops/azure, Argo CD"| aks
+  gha["deploy-azure (OIDC, workflow_dispatch)"] -->|"App Configuration, ACR promotion attestation, GitOps or direct apply"| aks
 ```
 
 O namespace, a RBAC do deployer, o ClusterSecretStore, o ALB Controller, o Application Gateway for
@@ -93,6 +93,11 @@ os valores da App Configuration (imagens, ID e frontend do AGC, ID do WAF, CIDRs
 se estende à subnet do AGC, que encaminha direto para os pods (documentação "Container networking
 with Application Gateway for Containers", verificada em 2026-10-11) — por isso as NetworkPolicies
 liberam a subnet do AGC, e não o nó.
+
+O perfil `full` acrescenta a malha ambient e um `HTTPRoute` interno para o exercício de canário: a
+rota divide `/variant` entre `mesh-stable` e `mesh-canary`, limita retries para `/fail` e demonstra
+ejeção do canário após respostas 5xx. O `mesh-probe` permitido e o `mesh-intruder` negado usam contas
+de serviço separadas. O overlay `local-platform` usa os mesmos manifests no cluster kind do tx02v2.
 
 ## Decisões
 
@@ -140,12 +145,13 @@ liberam a subnet do AGC, e não o nó.
     API) e `/` para o web; uma HealthCheckPolicy por Service define os health probes (`/healthz`,
     `/readyz`), que saem da subnet do AGC como o tráfego.
 13. **WAF como componente opcional.** `components/azure-waf` (WebApplicationFirewallPolicy no Gateway
-    inteiro) só entra no overlay `azure-waf`, escolhido pelo deploy quando `waf/policy-id` não é
-    `none`; com `none`, o overlay `azure` e o deploy apaga uma política antiga. O AGC só aceita
-    políticas DRS 2.1 da mesma assinatura e região (o deploy confere a assinatura).
-14. **Kustomize com componentes.** `base` neutra; `overlays/local` (kind) e `overlays/azure` /
-    `azure-waf` (componentes `azure` e `azure-waf`). Na Azure o HPA controla as réplicas da API
-    (`spec.replicas` removido). O CI renderiza e valida todos os overlays com `params.example.env`.
+    inteiro) só entra nos overlays `azure-waf` e `azure-waf-full`, escolhidos pelo deploy quando
+    `waf/policy-id` não é `none`; com `none`, `azure`/`azure-full` removem uma política antiga. O AGC
+    só aceita políticas DRS 2.1 da mesma assinatura e região (o deploy confere a assinatura).
+14. **Kustomize com componentes.** `base` neutra; `overlays/local` (kind), `azure` e `azure-waf`
+    (perfil core), `azure-full` e `azure-waf-full` (core mais `mesh-full`), e `local-platform` (malha
+    no kind do tx02v2). Na Azure o HPA controla as réplicas da API (`spec.replicas` removido). O CI
+    renderiza e valida todos os overlays com `params.example.env`.
 15. **Schemas dos CRDs gerados e fixados.** O kubeconform valida Gateway, HTTPRoute, HealthCheckPolicy
     e WebApplicationFirewallPolicy contra schemas gerados por `scripts/update-crd-schemas.sh` a partir
     da imagem de CRDs do ALB Controller 1.12.2 (por digest), que traz a Gateway API v1.5.1 standard:
@@ -155,13 +161,14 @@ liberam a subnet do AGC, e não o nó.
 16. **Segurança de pods.** Pod Security `restricted` em todo pod, sem token de service account,
     NetworkPolicies que negam tudo e liberam só o necessário.
 17. **Tags de imagem que não mudam.** No ACR, tag = SHA completo do commit. O ACR Basic não tem
-    imutabilidade de tags, então o deploy lista as tags antes e **nunca** faz push sobre uma tag que
-    já existe (reaproveita a imagem). Localmente a tag é `e2e` (kind) ou `local` (compose).
-18. **Tokens Azure no começo do deploy.** O `azure/login` troca o token OIDC do GitHub (válido de 5 a
-    10 minutos) por tokens do Entra ID; depois que ele expira, o Azure CLI só reaproveita os tokens
-    que já tem (cerca de uma hora). Por isso o deploy lê a App Configuration, gera o kubeconfig
-    (`kubelogin convert-kubeconfig -l azurecli`), faz o preflight de RBAC e o login no ACR **antes** de
-    construir as imagens — e falha cedo, sem gastar o build, se a plataforma não estiver pronta.
+    imutabilidade de tags, então o deploy consulta apenas a tag do app. Se ela existe, confere o image
+    ID; se não existe, faz push da imagem já verificada. Nunca sobrescreve uma tag de commit. As
+    permissões usam Repository Writer com condições ABAC separadas para os dois repositórios; não
+    dependem de listar o catálogo do ACR. Localmente a tag é `e2e` (kind) ou `local` (compose).
+18. **Promoção atestada, sem rebuild.** O workflow `deploy-azure` verifica o release e a imagem GHCR,
+    promove a mesma imagem para o ACR e assina uma attestation que liga os digests de origem e destino.
+    No perfil full, Kyverno exige essa assinatura antes de admitir o pod. O deploy não reconstrói a
+    imagem. `platform_profile` seleciona `core|full`; `deploy_mode` seleciona `auto|gitops|push`.
 19. **Raízes do TLS do banco conferidas.** O deploy baixa as três raízes do contrato, confere o
     thumbprint SHA-1 de cada uma e recusa qualquer diferença antes de criar o ConfigMap
     `azure-pg-ca`; o `verify-full` confere a cadeia e o nome do servidor.

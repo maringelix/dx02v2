@@ -1,8 +1,12 @@
-# Contrato tx02v2 <-> dx02v2 — versão 3 (2026-10-16)
+# Contrato tx02v2 <-> dx02v2 — versão 4 (2026-10-17)
 
-Versão 3: a camada `full` do tx02v2 integra o app à malha ambient e ao Gatekeeper, usa GitOps com
-Argo CD e adiciona backup em Azure Blob com Workload ID. As 15 chaves da App Configuration não mudam.
-A versão 2 (2026-10-14) adicionou traces pelo OpenTelemetry Collector.
+Versão 4: duas chaves de DNS/ACME, certificado público no perfil full, HTTPS no AGC e redirect HTTP.
+Versão 3: malha ambient, Gatekeeper, GitOps e backup Azure Blob. A versão 2 adicionou traces pelo
+OpenTelemetry Collector.
+
+Os overlays `full` e `local-platform` usam o bundle experimental Gateway API v1.6.3 do tx02v2
+para o `retry` do waypoint. O schema do ALB Controller continua sendo usado para a entrada AGC
+dos overlays `core`.
 
 Interface entre a infraestrutura (`tx02v2`) e a aplicação (este repositório), na parte que o app usa.
 A fonte da verdade é o
@@ -14,10 +18,10 @@ repositórios e incremento da versão.
 
 | O quê | Onde | Status |
 |---|---|---|
-| Nomes de Services, portas, probes, Secrets, ConfigMap, Gateway (classe, anotação, frontend, listener), HTTPRoute (rotas), HealthCheckPolicies, WebApplicationFirewallPolicy, ExternalSecrets, HPA, NetworkPolicies, labels, só tipos que a Role `dx02v2-deployer` pode escrever | check `contract-app` (`scripts/check-manifests.mjs` sobre os overlays renderizados `azure` e `azure-waf`) | `verificado localmente` |
+| Nomes de Services, portas, probes, Secrets, ConfigMap, Gateway, HTTPRoute, HealthCheckPolicies, WebApplicationFirewallPolicy, ExternalSecrets, HPA, NetworkPolicies, Istio `AuthorizationPolicy`/`DestinationRule`, labels e tipos permitidos pela Role `dx02v2-deployer` | check `contract-app` (`scripts/check-manifests.mjs` sobre `azure`, `azure-waf`, `azure-full`, `azure-waf-full` e `local-platform`) | `em validação no CI` |
 | Endpoint OTLP da versão 2 no ConfigMap da API e NetworkPolicy só até o Collector (namespace `observability`, porta 4318) | check `contract-app` | `verificado localmente` |
 | Manifests válidos para Kubernetes 1.36, para os CRDs do ALB Controller 1.12.2 (Gateway API v1.5.1 standard, `alb.networking.azure.io/v1`) e para o CRD `ExternalSecret` (`external-secrets.io/v1`) | checks `crd-schemas` e `kubeconform` (estrito) | `verificado localmente` |
-| O deploy lê exatamente as 15 chaves abaixo, com o prefixo `tx02v2/lab/`, confere os valores fixos e monta o `azure-pg-ca` com as três raízes do contrato (thumbprints SHA-1 conferidos) | check `contract-app` (sobre `scripts/deploy-azure.sh`) | `verificado localmente` |
+| O deploy lê exatamente as 17 chaves abaixo, com o prefixo `tx02v2/lab/`, confere os valores fixos e monta o `azure-pg-ca` com as três raízes do contrato (thumbprints SHA-1 conferidos) | check `contract-app` (sobre `scripts/deploy-azure.sh`) | `verificado localmente` |
 | Formatos dos valores da App Configuration (imagens no ACR, ID e frontend do AGC, ID da política de WAF ou `none`, CIDRs das subnets) | `k8s_validate_params` em `scripts/lib/k8s.sh` e `scripts/deploy-azure.sh` | `verificado localmente` |
 | Valores fixos (`resource-group`, `cluster-name`, nomes dos segredos, ClusterSecretStore) iguais aos da App Configuration; preflight de API groups e RBAC no cluster | `scripts/deploy-azure.sh` falha antes de construir ou aplicar qualquer coisa | `não executado em nuvem (v2)` |
 | Comportamento real na Azure | `docs/RUNBOOK.md` | `não executado em nuvem (v2)` |
@@ -45,6 +49,8 @@ conter (o check `contract-app` recusa qualquer outro tipo):
   pods, pods/log, events, endpoints → get, list, watch; secrets → get, list, watch (o ESO escreve
   os segredos; o deployer nunca os escreve)
 - `networking.k8s.io`: networkpolicies → CRUD completo
+- `networking.istio.io`: destinationrules; `security.istio.io`: authorizationpolicies → CRUD completo, ambos
+  limitados ao namespace `dx02v2` para o waypoint e o exercício de canário do perfil full
 - `gateway.networking.k8s.io`: gateways, httproutes → CRUD completo
 - `alb.networking.azure.io`: `healthcheckpolicy`, `webapplicationfirewallpolicy` → CRUD completo
   (são os `spec.names.plural` dos CRDs do ALB Controller 1.12.2, iguais ao singular; uma regra RBAC
@@ -52,13 +58,15 @@ conter (o check `contract-app` recusa qualquer outro tipo):
 - `autoscaling`: horizontalpodautoscalers → CRUD completo; `policy`: poddisruptionbudgets → CRUD completo
 - `external-secrets.io`: externalsecrets → CRUD completo
 
-Com o perfil `full` do `tx02v2`, o Argo CD é o dono dos manifests do app. O deploy configura o caminho,
-as imagens e os valores reais em `spec.source.kustomize` da Application `dx02v2` no namespace `argocd`;
-em seguida, publica o commit do app e `params.env` copiado do exemplo na branch `gitops/azure` e pede
-refresh ao Argo CD. O app pai ignora somente `spec.source.path` e `spec.source.kustomize` dessa
-Application e usa `RespectIgnoreDifferences=true`. Para um cluster sem Argo CD, execute o script
-localmente com `DEPLOY_MODE=push`; o workflow do Actions sempre usa GitOps. A branch pública não
-recebe IDs reais da conta ou do projeto.
+Com `platform_profile=full`, o app usa o waypoint ambient e a rota de canário 80/20; a plataforma full
+do `tx02v2` instala a malha e o gate de assinatura que exige uma attestation da imagem promovida.
+O workflow `deploy-azure` aceita `platform_profile=core|full` e `deploy_mode=auto|gitops|push`.
+`auto` escolhe GitOps quando a Application `dx02v2` existe e faz apply direto quando ela não existe;
+erros de permissão ou de conexão falham fechados. Com GitOps, o deploy configura caminho, imagens e
+valores reais em `spec.source.kustomize`, publica a revisão em `gitops/azure` e espera o Argo CD.
+Para usar o perfil full, rode o workflow a partir de `main` para que ele promova e ateste os digests
+no ACR antes do deploy. O script local aceita `DEPLOY_MODE=push`; a branch pública não recebe IDs
+reais da conta ou do projeto.
 
 ## OIDC do GitHub
 
@@ -69,7 +77,8 @@ tx02v2: `github_owner`, `github_owner_id`, `dx02v2_repository_id`, sem padrão; 
 registrado de novo tem outros IDs e não herda o lab). O environment `lab` só implanta a partir de `main`. Por isso o job do `deploy-azure.yml` usa
 `environment: lab` (o check `policy-workflows` exige).
 
-Papéis Azure de `dx02v2-gha-deploy` (atribuídos pelo root do lab do tx02v2): `AcrPush` no registry;
+Papéis Azure de `dx02v2-gha-deploy` (atribuídos pelo root do lab do tx02v2): `Container Registry Repository Writer`
+com condições ABAC apenas para `dx02v2/api` e `dx02v2/web`;
 `Azure Kubernetes Service Cluster User Role` no cluster (para obter o kubeconfig);
 `App Configuration Data Reader` no store do contrato. Nada no Key Vault. Acesso Kubernetes só pela
 RoleBinding acima.
@@ -94,7 +103,9 @@ neste repositório.
 | `eso/cluster-secret-store` | `azure-key-vault` | conferida contra o `secretStoreRef` dos ExternalSecrets |
 | `agc/id` | resource ID do Application Gateway for Containers | anotação `alb.networking.azure.io/alb-id` do Gateway (`AGC_ID`); a assinatura do ID precisa ser a do `az` logado |
 | `agc/frontend-name` | nome do frontend | `spec.addresses` do Gateway, tipo `alb.networking.azure.io/alb-frontend` (`AGC_FRONTEND`; ver a nota 1) |
-| `waf/policy-id` | resource ID da política de WAF, ou o literal `none` quando o tx02v2 roda com `enable_waf = false` | WebApplicationFirewallPolicy `dx02v2` (`WAF_POLICY_ID`, overlay `azure-waf`); com `none`, overlay `azure` e a política antiga é apagada |
+| `dns/hostname` | subdomínio público do app ou `disabled` | `DNS_HOSTNAME`; obrigatório no perfil full, aplicado aos listeners e rotas HTTPS/redirect |
+| `dns/acme-email` | contato ACME ou `disabled` | confere o par com `dns/hostname`; emissão e renovação são responsabilidade do tx02v2 |
+| `waf/policy-id` | resource ID da política de WAF, ou o literal `none` quando o tx02v2 roda com `enable_waf = false` | WebApplicationFirewallPolicy `dx02v2` (`WAF_POLICY_ID`, overlays `azure-waf`/`azure-waf-full`); com `none`, overlays `azure`/`azure-full` e a política antiga é apagada |
 | `deploy/principal-id` | object ID de `dx02v2-gha-deploy` | conferida (formato) |
 
 ## Key Vault `tx02v2-lab-<sufixo>` (autorização RBAC; valores nunca no state/plan)
@@ -134,15 +145,17 @@ neste repositório.
   Local: `DB_SSL_MODE=disable`. Com `APP_ENV=lab` a API recusa qualquer modo diferente de `verify-full`.
 - Services: `api` (porta 3000 http, 9464 métricas), `web` (porta 8080).
 - Tráfego (só Azure): Gateway `dx02v2` (classe `azure-alb-external`, anotação
-  `alb.networking.azure.io/alb-id` = `agc/id`, frontend `agc/frontend-name`), listener HTTP na porta
-  80 (HTTPS `planejado`); HTTPRoute `dx02v2`: `/api` → `api:3000`, `/` → `web:8080`;
+  `alb.networking.azure.io/alb-id` = `agc/id`, frontend `agc/frontend-name`). Core usa HTTP na porta
+  80; full usa HTTPS na porta 443 com Secret `dx02v2-tls` do tx02v2 e redireciona HTTP com 301.
+  HTTPRoute `dx02v2`: `/api` → `api:3000`, `/` → `web:8080`;
   HealthCheckPolicies `web` (`/healthz`) e `api` (`/readyz`); WebApplicationFirewallPolicy `dx02v2`
   apontando para o Gateway com `waf/policy-id` (omitida com `none`).
 - Política de WAF (do tx02v2): modo Prevention, regras gerenciadas DRS 2.1 + Bot Manager 1.1, inspeção
   do corpo ligada com limite de 128 KB — então corpos grandes chegam à API, que responde 413 ela
   mesma (o smoke manda 70 KB; ver a nota 3). Nenhuma regra personalizada pode bloquear o smoke test;
   um limite de taxa, se existir, precisa ser >= 300 requisições por minuto por cliente.
-- NetworkPolicies na Azure: entrada em web:8080 e api:3000 só a partir de `agc-subnet-cidr`; saída da
+- NetworkPolicies na Azure: entrada em web:8080 e api:3000 só a partir de `agc-subnet-cidr`; no full,
+  entrada no pod temporário do solver ACME somente de `agc-subnet-cidr`:8089 para renovações; saída da
   api para `postgres-subnet-cidr`:5432; DNS (base).
 - PostgreSQL Flexible Server 17, porta 5432, só acesso privado (subnet delegada + zona DNS privada),
   `require_secure_transport = on`, TLS >= 1.2.
@@ -167,8 +180,8 @@ então o contrato continua na versão 1; ficam aqui como registro de por que o t
    `verify-full` confere o nome); a identidade kubelet do AKS tem `AcrPull` no registry; os nós são
    x86-64 (as imagens são `linux/amd64`); a subnet do AGC com Azure CNI Overlay é exatamente /24 (o
    deploy recusa outro prefixo); e cada principal de `app_deployer_principal_ids` (deploy a partir de
-   um laptop) recebe os mesmos papéis Azure da `dx02v2-gha-deploy` (AcrPush, Azure Kubernetes Service
-   Cluster User Role e App Configuration Data Reader) além da RoleBinding.
+   um laptop) recebe os mesmos papéis Azure da `dx02v2-gha-deploy` (Repository Writer condicionado aos
+   dois repositórios, Azure Kubernetes Service Cluster User Role e App Configuration Data Reader), além da RoleBinding.
 
 ## Lab local (contrato local do tx02v2, versão 2)
 

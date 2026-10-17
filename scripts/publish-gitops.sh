@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <azure> <azure|azure-waf> <source-commit-sha> <api-digest> <web-digest>" >&2
+  echo "usage: $0 <azure> <azure|azure-waf|azure-full|azure-waf-full> <source-commit-sha> <api-digest> <web-digest>" >&2
   exit 2
 }
 
@@ -18,7 +18,7 @@ web_digest=$5
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || usage
 [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ && "$web_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
 case "$cloud:$overlay" in
-  azure:azure|azure:azure-waf) ;;
+  azure:azure|azure:azure-waf|azure:azure-full|azure:azure-waf-full) ;;
   *) usage ;;
 esac
 
