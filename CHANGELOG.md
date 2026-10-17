@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
+
+### Added
+
+- R9 independent Docker A/B recovery gate: verified backup/configuration, PostgreSQL TLS,
+  reconnect without API restart, live-writer promotion refusal, corruption rejection, primary
+  disk loss, measured RPO/RTO and fenced failback preserving writes made in the secondary.
+  The job and release gates require the exact tested/scanned images; cloud recovery is unrun.
 ### Fixed
 
 - Keep pod-IP metrics scraping reachable only to the authenticated Prometheus identity on port
