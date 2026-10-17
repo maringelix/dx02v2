@@ -1,4 +1,4 @@
-# Istio ambient (the namespace dx02v2 is in the mesh, label set by tx01v2): mTLS STRICT between every
+# Istio ambient (the namespace dx02v2 is in the mesh, label set by tx02v2): mTLS STRICT between every
 # pod and identity-based L4 authorization enforced by ztunnel. v1 shipped PeerAuthentication PERMISSIVE
 # with no sidecars at all (docs/LICOES_APRENDIDAS.md of tx03v2); here the e2e proves both.
 apiVersion: security.istio.io/v1
