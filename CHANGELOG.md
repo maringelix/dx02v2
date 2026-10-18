@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- Pin the local infrastructure to merged tx02v2#20 (`50635e341d859259ae728aac1851a2d3187eca6c`) so platform CI uses the canonical English documentation paths and the already verified readiness corrections. Application contract v5 remains unchanged.
+
+- Translate public web labels, errors, announcements and metadata into English; set HTML language en and date locale en-US, preserving application logic, payloads and Unicode fixtures. Existing UI assertions now cover English text and the date locale.
+
+- Translate all public documentation into English, preserve historical evidence and technical contract values, adopt canonical filenames and link the central getting-started guide. Align Azure onboarding with immutable OIDC subjects, variable/secret ownership, current signed publication/promotion workflows, full DNS and DR prerequisites.
+- Replace bilingual README requirements with English status/onboarding coverage; pin the merged infrastructure documentation revision for family/platform compatibility.
+
 - R9: select the regional contract, AKS, ACR, secret references and independent GitOps branch;
   verify recovered HTTPS, source revision and writes before DNS cutover.
 
@@ -91,7 +100,7 @@ All notable changes to this project are documented here. The format follows
   replace a SHA tag with different content, and pins the Kubernetes workloads and GitOps revision
   ConfigMap to the approved image digests.
 - `deploy/local/tx02v2.ref` follows tx02v2 to `c92def2` (tx02v2#10, the debts round of the roadmap).
-- Comments, script messages and docs say "the contract" or point to `docs/CONTRATO.md` instead of
+- Comments, script messages and docs say "the contract" or point to `docs/CONTRACT.md` instead of
   "contract v1": the contract has been at version 2 since round 1 (roadmap S.8); the README says that HTTPS on the gateway listener is outside contract v2.
 - The family table of both READMEs links the family hub `tx00v2` (roadmap, family guardrails,
   cross-repo checks).
@@ -154,7 +163,7 @@ All notable changes to this project are documented here. The format follows
   repository variable of the same name): a fork can test against its own tx02v2. A pinned commit that is
   not in that repository fails with a clear message.
 - The devcontainer declares 4 CPUs and 8 GB (the platform e2e runs the whole local lab).
-- The app on the full local platform of tx02v2 (docs/LAB_LOCAL.md), ported from `dx01v2`: overlay
+- The app on the full local platform of tx02v2 (docs/LOCAL_LAB.md), ported from `dx01v2`: overlay
   `local-platform` (Istio Gateway with HTTPS from cert-manager, HTTPRoutes, ExternalSecrets from
   `local-secrets`, HPA, `PeerAuthentication` STRICT, `AuthorizationPolicy` by identity, NetworkPolicies
   with HBONE, ServiceMonitor, five alert rules, a Grafana dashboard); `scripts/deploy-local.sh` (images
@@ -169,8 +178,8 @@ All notable changes to this project are documented here. The format follows
   `dx01v2` smoke accepts both API CSPs and has no edge modes).
 
 - Initial v2 of the Azure application lab, started from every tracked file of `dx01v2` at commit
-  `22e69c4` (the same app on both clouds, docs/ARQUITETURA.md) and adapted to the AKS cluster of
-  `tx02v2` (contract v1, docs/CONTRATO.md):
+  `22e69c4` (the same app on both clouds, docs/ARCHITECTURE.md) and adapted to the AKS cluster of
+  `tx02v2` (contract v1, docs/CONTRACT.md):
   - Azure path: `deploy/k8s/components/azure` and `overlays/azure` (Gateway `dx02v2` on Application
     Gateway for Containers in "bring your own" mode, HTTPRoute `/api` → api:3000 and `/` → web:8080,
     one HealthCheckPolicy per Service, ExternalSecrets from Key Vault through the ClusterSecretStore
@@ -228,14 +237,14 @@ All notable changes to this project are documented here. The format follows
 
 - The CI (`static`, `test`, `images`, `e2e`) ran green on GitHub: the README status matrix now says
   `verified in CI` for those rows (the compose row stays `verified locally`).
-- docs/CONTRATO.md mirrors the contract v1 of tx02v2: the Role lists the real AGC CRD plurals
+- docs/CONTRACT.md mirrors the contract v1 of tx02v2: the Role lists the real AGC CRD plurals
   (`healthcheckpolicy`, `webapplicationfirewallpolicy`), and the implementation notes are recorded as
   incorporated (frontend through `spec.addresses`, /24 AGC subnet, x86-64 nodes, kubelet `AcrPull`,
-  the three Azure roles of `app_deployer_principal_ids`). docs/RUNBOOK.md and docs/SUSTENTACAO.md
+  the three Azure roles of `app_deployer_principal_ids`). docs/RUNBOOK.md and docs/MAINTENANCE.md
   follow.
 - The README family table and AGENTS.md link the Google Cloud pair (`tx03v2`, `dx03v2`), now public;
   `dx03v2` runs this same application (AGENTS.md rule 6 and the parity routine of
-  docs/SUSTENTACAO.md, section 5.10, name it).
+  docs/MAINTENANCE.md, section 5.10, name it).
 - One integration test case more, ported from `dx03v2` for parity: the
   `[<supplied>,]<client-ip>,<lb-ip>` `X-Forwarded-For` of the Google Cloud Application Load Balancer
   with `TRUST_PROXY_HOPS=2` (`api/test/integration/rate-limit.test.ts`, now identical in dx02v2 and

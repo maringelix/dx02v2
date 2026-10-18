@@ -8,8 +8,7 @@ what is specific to the app.
 
 What is proven, and how, is in the [status matrix](README.md#status-matrix). In short: the harness,
 the kind e2e and the app on the local platform are `verified in CI`; the Azure deploy of v2 is
-`not run in the cloud (v2)`. Most documents under `docs/` are in Brazilian Portuguese; this page, the
-README, AGENTS.md and CONTRIBUTING.md are in English.
+`not run in the cloud (v2)`. All public documentation is in English. Use the [central getting-started guide](https://github.com/maringelix/tx00v2/blob/main/docs/GETTING_STARTED.md) for the complete fork-to-cloud sequence.
 
 ## 1-3. The steps both repositories share
 
@@ -46,7 +45,7 @@ lab, deploys the app through the git server of the lab and Argo CD, runs 18 prob
 over HTTPS through an Istio Gateway, mTLS, metrics, alert rules, the dashboard, logs, one trace from the
 edge to the database, Trivy reports, the HPA, a zero-downtime rollout, a database backup and restore,
 self-heal and two chaos experiments) and always destroys the lab
-([docs/LAB_LOCAL.md](docs/LAB_LOCAL.md)). It needs about 8 GB of memory for Docker, or 7 GB with
+([docs/LOCAL_LAB.md](docs/LOCAL_LAB.md)). It needs about 8 GB of memory for Docker, or 7 GB with
 `LOCAL_SIZE=small make e2e-platform` (the same platform with smaller limits and short retention), and
 takes 25-45 minutes on a laptop (about 20 in CI). With less memory, `make e2e` alone still proves the manifests
 on kind.
@@ -78,7 +77,7 @@ the repository variables of this fork (`github_variables_dx02v2`: `AZURE_CLIENT_
 `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `AZURE_APPCONFIG_ENDPOINT`, whose store exists only
 after the apply). First run `publish-images` from `main` with the ID of a successful CI run for the
 same commit. Then run `deploy-azure` from `main` with that release run ID and approve the `lab`
-environment. Choose `platform_profile=core|full` to match the tx02v2 installation, and
+environment. For DR add AZURE_DR_APPCONFIG_ENDPOINT from the TX output and follow both CONTINUITY runbooks before selecting target=secondary. Choose `platform_profile=core|full` to match the tx02v2 installation, and
 `deploy_mode=auto|gitops|push`; `auto` uses Argo CD when the `dx02v2` Application exists and otherwise
 applies directly. The workflow verifies the release, promotes the images to ACR without rebuilding,
 attests the promoted digests and runs the smoke test through Application Gateway for Containers.
@@ -112,6 +111,6 @@ Pull requests to the original repository are welcome: see [CONTRIBUTING.md](CONT
 change to `api/`, `web/` or `e2e/` has to reach the three app repositories (the parity rule of
 AGENTS.md). Workflow runs from forks wait for the maintainer's approval, and the same harness decides.
 
-## R10: capacidade e FinOps
+## R10: capacity and FinOps
 
-Veja [Capacidade e SLO](docs/FINOPS.md) para carga limitada, HPA up/down, PDB/drain, rightsizing, pool PostgreSQL e showback. Prova Docker em Actions; nada executado na nuvem (v2).
+See [Capacity and SLO](docs/FINOPS.md) for bounded load, HPA up/down, PDB/drain, rightsizing, PostgreSQL pool bottlenecks and showback. Docker evidence runs in Actions; nothing in v2 has run in the cloud.

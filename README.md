@@ -1,12 +1,11 @@
 # dx02v2
 
-R9 data recovery and proof limits: [docs/CONTINUIDADE.md](docs/CONTINUIDADE.md).
+R9 data recovery and proof limits: [docs/CONTINUITY.md](docs/CONTINUITY.md).
 
 Application half of the Azure DevOps lab: a small message board (Express 5 API, React 19 page, PostgreSQL 17) with containers, Kubernetes manifests and a kind end-to-end test.
 
 [![ci](https://github.com/maringelix/dx02v2/actions/workflows/ci.yml/badge.svg)](https://github.com/maringelix/dx02v2/actions/workflows/ci.yml)
 
-[Português](README.pt-BR.md)
 
 **Fork this lab:** [FORK.md](FORK.md) takes you from a fork to a running lab, on your machine first, then in your own cloud account.
 
@@ -21,7 +20,7 @@ the cloud** — the status matrix says exactly what is proven and how.
 
 This repository runs the same application as `dx01v2` (the AWS pair), so the comparison between
 clouds stays fair: only the deploy target changes. How the two stay in sync is in
-[docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 The lab family (v2):
 
@@ -31,7 +30,7 @@ The lab family (v2):
 | [`tx01v2`](https://github.com/maringelix/tx01v2) | AWS | infrastructure (Terraform, EKS, RDS, platform layer) | see its status matrix |
 | [`dx01v2`](https://github.com/maringelix/dx01v2) | AWS | application (the same app as this repository) | see its status matrix |
 | [`tx02v2`](https://github.com/maringelix/tx02v2) | Azure | infrastructure (Terraform, AKS, PostgreSQL Flexible Server, Application Gateway for Containers, platform layer) | sibling of this repository, see its status matrix |
-| `dx02v2` (this repo) | Azure | application (built against `docs/CONTRATO.md`) | see status matrix |
+| `dx02v2` (this repo) | Azure | application (built against `docs/CONTRACT.md`) | see status matrix |
 | [`tx03v2`](https://github.com/maringelix/tx03v2) | GCP | infrastructure (Terraform, GKE Autopilot, Cloud SQL, Cloud Armor) | see its status matrix |
 | [`dx03v2`](https://github.com/maringelix/dx03v2) | GCP | application (the same app as this repository) | see its status matrix |
 
@@ -46,15 +45,15 @@ The lab family (v2):
 | API unit + integration tests against a real PostgreSQL 17 (coverage gate: lines >= 80 %, branches >= 70 %) | `verified in CI` | `make test` (`test:api`); CI job `test` |
 | Web tests with Testing Library + jsdom (coverage gate: lines >= 70 %) | `verified in CI` | `make test` (`test:web`); CI job `test` |
 | Images: build, numeric non-root user, no npm or shell in the API runtime, trivy HIGH/CRITICAL gate | `verified in CI` | `make build`; CI job `images` |
-| DevSecOps gates: CodeQL SARIF, SonarQube Quality Gate, Trivy filesystem and image scans, Gitleaks history and negative fixture, OWASP ZAP Baseline | `verified in CI` | CI jobs `static`, `test`, `images`; `make dast`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
-| Release supply chain: reuse CI-tested image IDs, publish by digest with SPDX SBOMs and Sigstore attestations, verify before repo-scoped ACR promotion, attest the promoted digests and enforce the signature in the full profile | `workflow implemented; release not yet published` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/SEGURANCA_CI.md`](docs/SEGURANCA_CI.md) |
+| DevSecOps gates: CodeQL SARIF, SonarQube Quality Gate, Trivy filesystem and image scans, Gitleaks history and negative fixture, OWASP ZAP Baseline | `verified in CI` | CI jobs `static`, `test`, `images`; `make dast`; [`docs/CI_SECURITY.md`](docs/CI_SECURITY.md) |
+| Release supply chain: reuse CI-tested image IDs, publish by digest with SPDX SBOMs and Sigstore attestations, verify before repo-scoped ACR promotion, attest the promoted digests and enforce the signature in the full profile | `workflow implemented; release not yet published` | `.github/workflows/publish-images.yml`, `.github/workflows/deploy-azure.yml`; [`docs/CI_SECURITY.md`](docs/CI_SECURITY.md) |
 | Compose stack (PostgreSQL → migrate → api → web on 127.0.0.1) + smoke test | `verified locally` | `scripts/dev-env.sh`, `scripts/compose-smoke.sh` (manual, not part of CI) |
 | kind end-to-end: Pod Security `restricted`, smoke test through nginx, NetworkPolicy enforcement | `verified in CI` | `make e2e` (`scripts/e2e-kind.sh`); CI job `e2e` |
 | Azure deploy (ACR, AKS of tx02v2, ExternalSecrets, Application Gateway for Containers + WAF, OpenTelemetry, optional ambient mesh/canary full profile; inputs select `core|full` and `auto|gitops|push`) | `not run in the cloud (v2)` | `.github/workflows/deploy-azure.yml`, `scripts/deploy-azure.sh`, `docs/RUNBOOK.md` |
-| HTTPS on AGC in the full profile, with HTTP redirect and the tx02v2 ACME certificate | `implemented; not run in the cloud (v2)` | `deploy/k8s/components/azure-https`, `docs/CONTRATO.md` |
-| Repository settings as code (ruleset, environment `lab`) | `verified locally` | `scripts/repo-guardrails.sh` applied; read back with `gh api` on 2026-10-14 (`docs/PUBLICACAO.md`) |
+| HTTPS on AGC in the full profile, with HTTP redirect and the tx02v2 ACME certificate | `implemented; not run in the cloud (v2)` | `deploy/k8s/components/azure-https`, `docs/CONTRACT.md` |
+| Repository settings as code (ruleset, environment `lab`) | `verified locally` | `scripts/repo-guardrails.sh` applied; read back with `gh api` on 2026-10-14 (`docs/PUBLISHING.md`) |
 | Overlay `local-platform` for the tx02v2 local lab: kustomize render + kubeconform strict, assertions against the local contract and the kinds of the AppProject `dx02v2`, five alert rules tested with promtool | `verified in CI` | `make static` (`kubeconform`, `contract-app`, `promtool-rules`) in a Linux container; CI job `static` |
-| **The app on the full local platform of tx02v2** (kind + emulated ACR, PostgreSQL Flexible Server, object storage, load balancer, git server): images to the lab registry, GitOps with Argo CD (Synced, Healthy, self-heal) | `verified in CI` | `make e2e-platform` (`scripts/deploy-local.sh`, `scripts/e2e-platform.sh`, `docs/LAB_LOCAL.md`); CI job `e2e-platform` |
+| **The app on the full local platform of tx02v2** (kind + emulated ACR, PostgreSQL Flexible Server, object storage, load balancer, git server): images to the lab registry, GitOps with Argo CD (Synced, Healthy, self-heal) | `verified in CI` | `make e2e-platform` (`scripts/deploy-local.sh`, `scripts/e2e-platform.sh`, `docs/LOCAL_LAB.md`); CI job `e2e-platform` |
 | HTTPS through the emulated load balancer and an Istio Gateway (cert-manager, lab CA), smoke test from outside the mesh (`SMOKE_EDGE=istio`); database TLS `verify-full` | `verified in CI` | `make e2e-platform` (probe `smoke`) |
 | Istio ambient: mTLS `STRICT`, `AuthorizationPolicy` by identity, NetworkPolicies with HBONE; Prometheus, Grafana dashboard, Loki; Gatekeeper, Trivy Operator, HPA 2-4; database backup + restore drill; chaos experiments with hypotheses (one API pod killed; 200 ms between the API and PostgreSQL) | `verified in CI` | `make e2e-platform` (probes `mesh`, `observability`, `trivy`, `hpa`, `backup`, `chaos`) |
 | Traces with OpenTelemetry: one trace in Tempo from the Istio Gateway to the PostgreSQL query (W3C trace context), `trace_id` in the logs in Loki, exemplars in the latency histogram | `verified in CI` | API tests (`telemetry`, `tracing`); `make e2e-platform` (probe `tracing`) |
@@ -87,7 +86,7 @@ flowchart LR
   `auto` mode it selects GitOps when the Application exists; the workflow input also supports
   explicit `gitops` and `push`. `platform_profile=full` enables the waypoint and canary exercise.
 - Design decisions, diagrams per environment, the dx01v2 ↔ dx02v2 and v1 → v2 tables:
-  [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start (free, local)
 
@@ -121,11 +120,11 @@ examples: [docs/API.md](docs/API.md).
 Containers with the WAF: about US$0.28 per hour (one frontend, one association, about one capacity
 unit; US$0.155 per hour without the WAF), that is about US$204 per month if forgotten, on top of the
 AKS nodes and PostgreSQL. Reference list prices from the Azure Retail Prices API (eastus2,
-2026-10-11); see the [tx02v2 cost doc](https://github.com/maringelix/tx02v2/blob/main/docs/CUSTOS.md)
+2026-10-11); see the [tx02v2 cost doc](https://github.com/maringelix/tx02v2/blob/main/docs/COSTS.md)
 and the official calculator. Use a dedicated subscription with a budget and destroy on the same day.
 
 Follow [docs/RUNBOOK.md](docs/RUNBOOK.md): tx02v2 bootstrap/apply/platform → GitHub variables of
-dx02v2 → `deploy-azure` workflow (core/full, auto/GitOps/push) → smoke test
+dx02v2 → `publish-images` → `deploy-azure` workflow (core/full, auto/GitOps/push) → smoke test
 through Application Gateway for Containers → tx02v2 destroy + leftover check → `cloud_run_report`
 issue.
 
@@ -149,21 +148,21 @@ issue.
 
 ## Docs
 
-All docs are in Brazilian Portuguese.
+All public documentation is in English. Start with the [central getting-started guide](https://github.com/maringelix/tx00v2/blob/main/docs/GETTING_STARTED.md).
 
 | Doc | Content |
 |---|---|
 | [FORK.md](FORK.md) | fork the lab: what GitHub does not copy, the local lab, your own cloud account |
-| [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | diagrams (local, kind, Azure), decisions, dx01v2 ↔ dx02v2, v1 → v2 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | diagrams (local, kind, Azure), decisions, dx01v2 ↔ dx02v2, v1 → v2 |
 | [docs/API.md](docs/API.md) | endpoints, errors, curl examples |
-| [docs/CONTRATO.md](docs/CONTRATO.md) | tx02v2 ⇄ dx02v2 contract v2 (app side; source of truth in tx02v2) |
+| [docs/CONTRACT.md](docs/CONTRACT.md) | tx02v2 ⇄ dx02v2 contract v5 (app side; source of truth in tx02v2) |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | local development, compose, kind e2e, Azure deploy |
-| [docs/SEGURANCA_CI.md](docs/SEGURANCA_CI.md) | DevSecOps gates, signed image releases, SBOMs and attestations |
-| [docs/LAB_LOCAL.md](docs/LAB_LOCAL.md) | the app on the tx02v2 local platform (GitOps deploy, probes, limits) |
+| [docs/CI_SECURITY.md](docs/CI_SECURITY.md) | DevSecOps gates, signed image releases, SBOMs and attestations |
+| [docs/LOCAL_LAB.md](docs/LOCAL_LAB.md) | the app on the tx02v2 local platform (GitOps deploy, probes, limits) |
 | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | rules, enforcement, exceptions, limits |
 | [docs/HARNESS.md](docs/HARNESS.md) | checks, strict mode, troubleshooting |
-| [docs/SUSTENTACAO.md](docs/SUSTENTACAO.md) | routines, end-of-support calendar, update procedures, parity with dx01v2 |
-| [docs/PUBLICACAO.md](docs/PUBLICACAO.md) | checklist to make the repository public |
+| [docs/MAINTENANCE.md](docs/MAINTENANCE.md) | routines, end-of-support calendar, update procedures, parity with dx01v2 |
+| [docs/PUBLISHING.md](docs/PUBLISHING.md) | checklist to make the repository public |
 
 ## Contributing
 
@@ -174,6 +173,6 @@ issues: [SECURITY.md](SECURITY.md).
 
 [MIT](LICENSE) — Copyright (c) 2025-2026 Bruno Maringeli.
 
-## R10: capacidade e FinOps
+## R10: capacity and FinOps
 
-Veja [Capacidade e SLO](docs/FINOPS.md) para carga limitada, HPA up/down, PDB/drain, rightsizing, pool PostgreSQL e showback. Prova Docker em Actions; nada executado na nuvem (v2).
+See [Capacity and SLO](docs/FINOPS.md) for bounded load, HPA up/down, PDB/drain, rightsizing, PostgreSQL pool bottlenecks and showback. Docker evidence runs in Actions; nothing in v2 has run in the cloud.

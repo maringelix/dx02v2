@@ -1,7 +1,7 @@
 # Observability of the app on the local platform: Prometheus scrapes the metrics port of the API
 # (prom-client: http_request_duration_seconds by method, route and status_code) and evaluates the
 # alerts below; Alertmanager delivers them to the alert sink of tx02v2. v1 had alert rules for series
-# that did not exist (docs/LICOES_APRENDIDAS.md of tx02v2, 9.2): every rule here uses a series the API
+# that did not exist (docs/LESSONS_LEARNED.md of tx02v2, 9.2): every rule here uses a series the API
 # or kube-state-metrics exports, and the harness tests them with promtool (check promtool-rules).
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

@@ -1,122 +1,121 @@
-# Guardrails do dx02v2
+# dx02v2 guardrails
 
-Um guardrail é uma regra mais o mecanismo que a faz valer — automático sempre que possível. Este
-documento lista as regras do repositório, onde cada uma é aplicada e o que elas não garantem.
-Tipos: `bloqueante` (falha o harness/CI), `alerta` (notifica), `processo` (disciplina humana/agente).
+A guardrail combines a rule with enforcement, automated where possible. This document names rules,
+enforcement and limits. Types: blocking (fails harness/CI), alert (notifies), process (human/agent
+discipline). IDs remain stable, including historical CUSTO/MUD identifiers.
 
-## Regras
+## Rules
 
-| ID | Regra | Por quê | Onde é aplicada | Tipo |
+| ID | Rule | Reason | Enforcement | Type |
 |---|---|---|---|---|
-| SEC-01 | Nenhum segredo no repositório | repositório público; histórico é para sempre | `gitleaks` (harness, pre-commit) | bloqueante |
-| SEC-02 | Sem identificadores reais: GUIDs só `00000000-0000-0000-0000-000000000000` (assinatura, tenant, client e object IDs), sufixo dos nomes do tx02v2 só `00000000`, IDs de 12 dígitos só `123456789012`, e-mails `example.com`, IPs privados ou RFC 5737 | evita expor assinaturas, identidades e pessoas | check `policy-identifiers` | bloqueante |
-| SEC-03 | Credenciais locais geradas em tempo de execução com valores aleatórios (`scripts/dev-env.sh`, `scripts/e2e-kind.sh`); `.env` ignorado pelo git; `.env.example` só com placeholders; nenhum `Secret` nos manifests | nada de senha padrão copiada para todo lado | `.gitignore`, `gitleaks`, `contract-app` | bloqueante |
-| SEC-04 | GitHub → Azure só por OIDC (`azure/login` com a managed identity `dx02v2-gha-deploy`, sujeito imutável do environment `lab`, com os IDs do dono e do repositório); `id-token: write` só no job `deploy` do `deploy-azure.yml`, nunca no `ci.yml`; nada de `creds:`, `client-secret` ou inputs interpolados | sem segredos de service principal; nenhum outro workflow obtém credenciais (erros do v1); um nome de conta apagado e registrado de novo não herda o lab | `policy-workflows`; `scripts/repo-guardrails.sh` confere o `sub` do repositório | bloqueante |
-| SEC-05 | Token de admin com 32+ caracteres, comparado em tempo constante; sem token configurado a rota responde 503 `admin_disabled` | nada de token curto nem comparação que vaza tempo | `api/src/config.ts`, testes `admin-auth`, `config`, `messages` | bloqueante |
-| SEC-06 | Logs redigem `Authorization`, `Cookie` e campos `password`/`token`; o deploy mascara no GitHub Actions o token do smoke e os identificadores lidos da App Configuration | segredos e IDs não vão parar em logs públicos | `api/src/logger.ts` + teste `logger`; `scripts/deploy-azure.sh` | bloqueante / processo |
-| SEC-07 | O TLS do banco na Azure só confia nas três raízes do contrato, baixadas e conferidas pelo thumbprint SHA-1; `verify-full` obrigatório com `APP_ENV=lab` | um download adulterado não vira raiz de confiança | `scripts/deploy-azure.sh`; `contract-app` (thumbprints); teste `config` | bloqueante |
-| SEC-08 | Testes e scripts só agem no que é do lab: os testes de integração, que apagam e recriam tabelas, só aceitam um banco cujo nome termina em `_test`; o `scripts/deploy-local.sh` só faz deploy no contexto `kind-tx02v2-local` | quem faz fork roda o harness na própria máquina, onde `DB_*` e o contexto atual do kubectl podem apontar para outro trabalho | `requireTestDatabase` (`api/test/integration/helpers.ts`) + teste `test-database`; check `test:api`; `require_lab_context` (`scripts/deploy-local.sh`) | bloqueante |
-| SEC-09 | O smoke test nunca manda o token de admin por HTTP puro para outra máquina: com HTTPS ou em `127.0.0.1` ele manda; senão pula só a chamada que precisa do token (o `deploy-azure.sh` nem lê o token, porque o frontend do AGC só fala HTTP) | o frontend do lab sem certificado é a internet | `e2e/smoke.mjs`, `scripts/deploy-azure.sh` | bloqueante |
-| SEC-10 | `rm -rf` em `scripts/lib/k8s.sh` só com variável não vazia (`${dest:?}`, `${tmp:?}`) | um destino vazio não pode apagar o que o caminho passa a ser | `policy-app` | bloqueante |
-| SUP-01 | Ferramentas do harness com versão e SHA256 fixados; divergência é erro fatal | cadeia de suprimentos | `scripts/install-tools.sh`, `tools/checksums.txt` | bloqueante |
-| SUP-02 | Toda action fixada por SHA de 40 caracteres com comentário `# vX.Y.Z` | tags podem ser movidas; o v1 fixou um SHA inexistente do `azure/login` | `policy-workflows` | bloqueante |
-| SUP-03 | Toda imagem por digest (Dockerfiles, compose, manifests, CI, kind, devcontainer e features); nada de `:latest` | erro do v1: trivy `latest` malicioso em março de 2026 | `policy-images` | bloqueante |
-| SUP-04 | npm com versões exatas em todos os `package.json` e `package-lock.json` em sincronia | lockfile fora de sincronia quebra builds | `version-consistency`, `npm-ci` (`npm ci` sempre no modo estrito) | bloqueante |
-| SUP-05 | trivy só via `scripts/install-tools.sh` (nunca `trivy-action`/`setup-trivy`, GHSA-69fq-xp46-6x23) | incidente de cadeia de suprimentos de março de 2026 | `policy-workflows` | bloqueante |
-| SUP-06 | Imagens sem vulnerabilidades HIGH/CRITICAL com correção disponível | o que é publicado não carrega CVE conhecido e corrigível | `trivy-image:api`, `trivy-image:web` | bloqueante |
-| SUP-07 | Versões coerentes entre arquivos: Node.js (`.nvmrc`, `engines`, imagem de build), digest do PostgreSQL (compose, CI, kind, harness), minor do Kubernetes (kind, kubectl, schemas) | uma atualização pela metade não passa | `version-consistency` | bloqueante |
-| SUP-08 | Dependabot mensal (npm, docker, actions, pre-commit), minor+patch agrupados, majors separados | nada apodrece em silêncio | `.github/dependabot.yml` | alerta |
-| SUP-09 | Schemas dos CRDs (Gateway API, Application Gateway for Containers) gerados dos CRDs do ALB Controller fixado por digest, nunca editados à mão | o kubeconform valida contra o que o cluster recebe | `crd-schemas` (`scripts/update-crd-schemas.sh --check`) | bloqueante |
-| K8S-01 | Manifests renderizados válidos com kubeconform estrito e schemas fixados (Kubernetes 1.36, Gateway API v1.5.1 standard, `alb.networking.azure.io/v1`, `ExternalSecret`) | manifest inválido não chega ao cluster | `kubeconform` | bloqueante |
-| K8S-02 | Pods conforme Pod Security `restricted`: `runAsNonRoot`, uid numérico, seccomp `RuntimeDefault`, sem escalada de privilégio, `drop: [ALL]`, `readOnlyRootFilesystem`, sem token de service account, sem `hostPath`/host namespaces, requests e limite de memória | menor privilégio; o namespace do AKS impõe `restricted` | `contract-app`; no kind, o e2e prova que um pod privilegiado é rejeitado | bloqueante |
-| K8S-03 | NetworkPolicies: nega tudo (entrada e saída) e libera só DNS, web → api:3000, api → PostgreSQL:5432 (local) ou a subnet do PostgreSQL (Azure), a subnet do AGC → web:8080 e api:3000 (um CIDR por regra, sem `except`) e métricas só do namespace `monitoring` | um pod comprometido não alcança o banco; erro do v1: regra sem `from` e saída para qualquer IP | `contract-app`; sondas do e2e no kind | bloqueante |
-| K8S-04 | Overlays `azure*` só com os tipos que a Role `dx02v2-deployer` pode escrever, só a anotação `alb.networking.azure.io/alb-id` (no Gateway) e o label `app.kubernetes.io/part-of: dx02v2` em tudo; namespace e RBAC são do tx02v2 | o deploy roda com privilégio mínimo | `contract-app`; preflight `kubectl auth can-i` do deploy | bloqueante |
-| K8S-05 | `trivy config` sem achados HIGH/CRITICAL nos manifests renderizados e nos Dockerfiles | segurança da configuração | `trivy-config` | bloqueante |
-| K8S-06 | Tráfego Azure só pelo Gateway `dx02v2` (HTTP 80, uma HTTPRoute: `/api` → api:3000, `/` → web:8080) com HealthCheckPolicies `/healthz` e `/readyz` e, com o WAF, a WebApplicationFirewallPolicy no Gateway inteiro | nada fica exposto fora do contrato | `contract-app` | bloqueante |
-| APP-01 | `trust proxy` é uma contagem de saltos (`TRUST_PROXY_HOPS`), nunca `true`; o rate limit usa `req.ip` | `X-Forwarded-For` falso não fura o limite | `policy-app`; teste `rate-limit` (inclui o formato do AGC); smoke (429 com XFF falso diferente a cada requisição) | bloqueante |
-| APP-02 | Sem middleware de CORS (mesma origem) e sem escapar HTML antes de gravar; a UI renderiza texto como texto | erro do v1: CORS fixo em localhost | `policy-app`; testes de integração e smoke (texto com `<b>` volta igual) | bloqueante |
-| APP-03 | UI sem estilos nem scripts inline (CSP `script-src 'self'; style-src 'self'`) e sem sourcemaps publicados | erros do v1: `unsafe-inline` e sourcemap público | `policy-app`; smoke; `image-policy:web` | bloqueante |
-| APP-04 | Cabeçalhos de segurança em toda resposta do nginx, inclusive assets e erros; HSTS só para requisições HTTPS; `server_tokens off` | erro do v1: HSTS com preload em HTTP | `policy-app`; smoke | bloqueante |
-| APP-05 | Erros sempre em JSON `{"error":{"code","message","requestId"}}`, sem detalhes internos: 400, 413, 404, 415, 429, 500, 503 | erro do v1: tudo virava 500 | testes de integração; smoke | bloqueante |
-| APP-06 | A API loga só pelo pino (JSON, com request ID em cada linha) | logs estruturados e redigidos | `policy-app` (nada de `console.*`); eslint `no-console` | bloqueante |
-| APP-07 | O token de admin fica só em memória no navegador | nada de credencial em `localStorage`/cookie | `policy-app` | bloqueante |
-| APP-08 | Imagem da API distroless, sem shell nem npm/npx/corepack; as duas imagens com uid:gid numérico não root e labels OCI `source`/`revision` | menor superfície de ataque | `policy-images`, `image-policy:api`, `image-policy:web`, `hadolint` | bloqueante |
-| APP-09 | Cobertura mínima: API linhas >= 80 % e branches >= 70 %; web linhas >= 70 %; os testes exercitam o código real | erro do v1: `expect(true).toBe(true)` | limites do vitest (`test:api`, `test:web`) | bloqueante |
-| APP-10 | Migrações aplicadas nunca são editadas (checksum em `schema_migrations`); uma por transação, sob advisory lock | réplicas e initContainers concorrentes não corrompem o schema | `api/src/migrate.ts`; teste `migrations` | bloqueante |
-| APP-11 | Contrato com o tx02v2 versionado; mudanças em PRs coordenados nos dois repositórios | os dois lados evoluem juntos | `docs/CONTRATO.md`, `contract-app` | processo |
-| APP-12 | O app é o mesmo do dx01v2: mudanças em `api/`, `web/` e `e2e/` vão para os dois repositórios | a comparação entre nuvens continua justa | template de PR; rotina de paridade (`docs/SUSTENTACAO.md`) | processo |
-| APP-13 | Nada do caminho da outra nuvem do dx01v2 volta (arquivos, manifests, workflows, scripts, docs); só README, ARQUITETURA e CHANGELOG comparam a família | o repositório descreve só o que faz | `policy-cloud`; `contract-app` (manifests renderizados) | bloqueante |
-| CUSTO-01 | Deploy só por `workflow_dispatch`, sem inputs, e environment `lab` (revisor obrigatório); o workflow usa GitOps e `contents: write` fica só no job de deploy | intenção explícita e push limitado ao job de deploy | `policy-workflows`, `scripts/publish-gitops.sh` | bloqueante |
-| CUSTO-02 | Rodada em nuvem termina no mesmo dia com o destroy do tx02v2 + checagem de sobras e um relatório `cloud_run_report` | o AGC com WAF (o maior item), o AKS e o PostgreSQL cobram por hora | `docs/RUNBOOK.md` | processo |
-| CUSTO-03 | O deploy nunca sobrescreve uma tag do ACR e falha antes do build se a plataforma ou a RBAC não estiverem prontas | nada de imagem trocada nem build pago à toa | `scripts/deploy-azure.sh` | bloqueante (no deploy) |
-| CI-01 | O CI é o harness: as checagens vivem em `scripts/harness.sh` e os jobs só chamam `make <alvo>` | o que passa local passa no CI | revisão de PR; `ci.yml` | processo |
-| CI-02 | Sem `continue-on-error: true`, `\|\| true`, `\|\| echo` em workflows | gates honestos; erro do v1: job de "lint" que só rodava `npm install` | `policy-workflows` | bloqueante |
-| CI-03 | `permissions: contents: read` no topo, `timeout-minutes`, `concurrency`, `ubuntu-24.04`, `persist-credentials: false` | menor privilégio e previsibilidade | `policy-workflows` | bloqueante |
-| CI-04 | `HARNESS_STRICT=1` no CI: todo SKIP vira FAIL e as versões das ferramentas precisam bater; o CI não usa segredos | nada é pulado em silêncio; erro do v1: job vermelho por um segredo que nunca existiu | `ci.yml`, `scripts/harness.sh` | bloqueante |
-| CI-05 | O job `e2e` testa exatamente as imagens que o job `images` construiu e escaneou (artefato) | o que vai para o cluster é o que passou no trivy | `ci.yml` | processo |
-| CI-06 | CI semanal agendado (segunda 06:00 UTC) | detecta CVEs novos, ignores vencidos e URLs quebradas | `ci.yml` | alerta |
-| MUD-01 | `main` protegido por ruleset: PR obrigatório, checks `static`, `test`, `images` e `e2e` estritos, sem force-push | toda mudança passa pelo harness | `.github/rulesets/main.json` + `scripts/repo-guardrails.sh` | bloqueante (depois de publicado) |
-| MUD-02 | Ignore de scanner só com `statement` e `expired_at` em até ~7 meses | exceções revisadas | `trivyignore-policy` | bloqueante |
-| MUD-03 | Conventional Commits; um assunto por PR; CHANGELOG `[Unreleased]` atualizado | histórico legível | template de PR | processo |
-| DOC-01 | README e docs só afirmam o que é verificado, com os rótulos exatos; sem auto-elogios; texto UTF-8 com LF | erro do v1: README/CHANGELOG com afirmações falsas e manifests em UTF-16 | `repo-structure` (rótulos, auto-elogios, tamanho do README, LF, UTF-8 sem BOM); revisão | bloqueante |
-| DOC-02 | Docs atualizadas na mesma mudança do código | docs não envelhecem | template de PR | processo |
-| AGT-01 | Agentes de IA nunca executam ações que alteram a nuvem sem pedido humano explícito na tarefa | dinheiro e segurança | `AGENTS.md` | processo |
-| AGT-02 | Agentes não enfraquecem gates, não baixam cobertura e não adicionam ignores sem justificativa e validade | o harness só vale se for respeitado | `AGENTS.md`; checks acima | processo |
-| LOC-01 | No lab local o app entra só pelo GitOps (Argo CD, AppProject `dx02v2`); o deploy não aplica manifests do app direto no cluster | um único dono do namespace (v1 tinha dois) | `scripts/deploy-local.sh`; sonda `gitops` | bloqueante (job `e2e-platform`) |
-| LOC-02 | No lab local: mTLS `STRICT`, `AuthorizationPolicy` por identidade e NetworkPolicies com HBONE e as sondas do kubelet do ambient | zero trust com identidade, não só por IP | `contract-app` (`local-platform`); sonda `mesh` | bloqueante |
-| LOC-03 | Toda regra de alerta usa uma série que o app ou o kube-state-metrics exporta e tem teste no promtool | v1 alertava sobre séries inexistentes | `promtool-rules`; sonda `observability` | bloqueante |
-| AGT-03 | Agentes param e perguntam nos casos listados em `AGENTS.md` | decisões caras são humanas | `AGENTS.md` | processo |
+| SEC-01 | No committed secrets | public repository; history persists | gitleaks, harness/pre-commit | blocking |
+| SEC-02 | No real identifiers: all-zero subscription/tenant/client/object GUIDs, tx02v2 suffix 00000000, placeholder 12-digit ID123456789012, example.com emails, private/RFC5737 IPs | avoid exposing people/subscriptions/identities | policy-identifiers | blocking |
+| SEC-03 | Random runtime local credentials with dev-env.sh/e2e-kind.sh; ignored .env; example placeholders; no Secret objects in app manifests | no copied default passwords | .gitignore, gitleaks, contract-app | blocking |
+| SEC-04 | GitHub→Azure uses OIDC deploy managed identity, immutable lab subject with owner/repository IDs; no creds/client-secret/interpolated credential inputs; CI cannot authenticate to cloud | no service-principal secrets; re-registered names inherit no trust | policy-workflows; repo-guardrails.sh checks sub | blocking |
+| SEC-05 | Admin token >=32 characters, constant-time comparison; absent token gives503 admin_disabled | prevent weak tokens/timing disclosure | config.ts; admin-auth/config/messages tests | blocking |
+| SEC-06 | Redact Authorization/Cookie/password/token; deploy masks App Configuration identifiers in Actions logs | no secrets/IDs in public logs | logger.ts/logger test; deploy-azure.sh | blocking/process |
+| SEC-07 | Azure DB TLS trusts only three contract roots, downloaded and SHA-1-thumbprint-verified; lab requires verify-full | altered download cannot become trusted | deploy-azure.sh, contract-app, config test | blocking |
+| SEC-08 | Integration tests recreate tables only with DB_NAME ending _test; deploy-local only kind-tx02v2-local | operator DB_* or context may target other work | requireTestDatabase in integration/helpers.ts, test-database/test:api; require_lab_context | blocking |
+| SEC-09 | Smoke sends tokens only through HTTPS/localhost; otherwise omits only the credentialed call. Cloud deploy never reads/sends the token, including core HTTP | public ingress must not leak credentials | smoke.mjs, deploy-azure.sh | blocking |
+| SEC-10 | k8s.sh rm -rf requires nonempty destination, `${dest:?}`/`${tmp:?}` | empty variables cannot broaden deletion | policy-app | blocking |
+| SUP-01 | Tool versions/SHA256 pinned; mismatch fatal | supply chain | install-tools.sh, checksums.txt | blocking |
+| SUP-02 | Actions use40-character SHA and # vX.Y.Z | tags move; v1 used nonexistent azure/login SHA | policy-workflows | blocking |
+| SUP-03 | Digest-pin Dockerfile/Compose/manifest/CI/kind/devcontainer images/features; no latest | March2026 malicious Trivy latest incident | policy-images | blocking |
+| SUP-04 | Exact npm versions, synchronized lock | reproducible builds | version-consistency/npm-ci; strict mode always npm ci | blocking |
+| SUP-05 | Install Trivy through install-tools.sh only, never trivy-action/setup-trivy | March2026 incident GHSA-69fq-xp46-6x23 | policy-workflows | blocking |
+| SUP-06 | No fixable HIGH/CRITICAL image CVEs | do not publish known fixable vulnerabilities | trivy-image:api/web | blocking |
+| SUP-07 | Match Node major across .nvmrc/engines/builder, PostgreSQL digest across Compose/CI/kind/harness, Kubernetes minor across kind/kubectl/schemas | reject partial upgrades | version-consistency | blocking |
+| SUP-08 | Monthly npm/docker/actions/pre-commit Dependabot; grouped minor/patch, separate major | detect drift | dependabot.yml | alert |
+| SUP-09 | Generate GatewayAPI/AGC schemas from pinned ALB CRD image; no hand edits; separately pin experimental waypoint schemas | validate installed interface | crd-schemas, update-crd-schemas.sh --check | blocking |
+| K8S-01 | Strict kubeconform with pinned Kubernetes 1.36, ALB GatewayAPI1.5.1 standard, alb.networking.azure.io/v1, ExternalSecret; full waypoint experimental schemas | invalid manifests cannot reach cluster | kubeconform | blocking |
+| K8S-02 | Restricted Pods: numeric non-root UID, RuntimeDefault, no escalation, drop ALL, read-only root, no SA token/hostPath/host namespaces, requests/memory limits | least privilege, enforced app namespace | contract-app; kind rejects privileged Pod | blocking |
+| K8S-03 | Default-deny; allow approved DNS, web→api3000, API→local PostgreSQL 5432/Azure subnet, AGC subnet→web8080/api3000, monitoring metrics; one CIDR/rule, no except | prevent lateral traversal; v1 omitted from/allowed arbitrary egress | contract-app, kind probes | blocking |
+| K8S-04 | Azure overlays use only deployer-writable kinds and approved annotations including alb.networking.azure.io/alb-id on Gateway; all objects part-of dx02v2; TX owns namespace/RBAC | least-privilege deploy | contract-app, kubectl auth can-i | blocking |
+| K8S-05 | No HIGH/CRITICAL rendered-manifest/Dockerfile findings | secure configuration | trivy-config | blocking |
+| K8S-06 | Entry through dx02v2 Gateway/HTTPRoute (/api→api3000, /→web8080), /healthz and /readyz policies, optional whole-Gateway WAF; full adds HTTPS/HTTP redirect | no uncontracted exposure | contract-app | blocking |
+| APP-01 | trust proxy is TRUST_PROXY_HOPS count, never true; limiter uses req.ip | forged XFF cannot bypass | policy-app, AGC rate-limit tests, forged-XFF429 smoke | blocking |
+| APP-02 | Same-origin without CORS middleware/pre-storage HTML escaping; UI renders text | avoid v1 localhost-only CORS | policy-app; tests/smoke preserve literal <b> | blocking |
+| APP-03 | No inline UI style/scripts; CSP script-src self/style-src self; no sourcemaps | prevent v1 unsafe-inline/public maps | policy-app, smoke, image-policy:web | blocking |
+| APP-04 | nginx security headers on responses/assets/errors; HSTS only HTTPS; server_tokens off | v1 preload-HSTS over HTTP | policy-app, smoke | blocking |
+| APP-05 | JSON error.code/message/requestId, no internals, for400/413/404/415/429/500/503 | v1 returned500 for everything | integration/smoke | blocking |
+| APP-06 | pino-only JSON logs with request ID per line | structured/redacted logs | policy-app forbids console.*, eslint no-console | blocking |
+| APP-07 | Browser admin token only in memory | no localStorage/cookie credentials | policy-app | blocking |
+| APP-08 | Distroless API without shell/npm/npx/corepack; both images numeric non-root uid:gid and OCI source/revision | reduce attack surface | policy-images, image-policy:api/web, hadolint | blocking |
+| APP-09 | API >=80% lines/>=70% branches, web >=70% lines on real code | no expect(true).toBe(true) substitutes | Vitest thresholds | blocking |
+| APP-10 | Never edit applied migration; schema_migrations checksum; transaction per migration, advisory lock | concurrent replicas/initContainers cannot corrupt schema | migrate.ts, migrations tests | blocking |
+| APP-11 | Versioned TX contract; coordinated interface PRs | both sides evolve together | CONTRACT.md, contract-app | process |
+| APP-12 | api/web/e2e parity across all three apps or explicit cloud-specific justification | fair comparison | PR template, MAINTENANCE routine | process |
+| APP-13 | No unrelated-cloud implementation; README/ARCHITECTURE/CHANGELOG may compare family | describe actual behavior | policy-cloud, contract-app | blocking |
+| CUSTO-01 | Explicit workflow_dispatch release/deploy; validated ci_run_id/release_run_id, protected lab; GitOps contents:write only deploy | deliberate intent/bounded push rights | policy-workflows, publish-gitops.sh | blocking |
+| CUSTO-02 | Same-day TX destroy, leftovers, cloud_run_report | AGC/WAF, AKS, PostgreSQL charge while provisioned | RUNBOOK.md | process |
+| CUSTO-03 | Never replace ACR tag; verify promoted image IDs/digests, platform/RBAC | avoid substitution/waste | deploy-azure.sh | blocking during deploy |
+| CI-01 | Harness is CI; checks in harness.sh, jobs call make targets | local reproducibility | PR review, ci.yml | process |
+| CI-02 | No continue-on-error:true, `\|\| true`, `\|\| echo` workflows | meaningful gates; v1 lint only ran npm install | policy-workflows | blocking |
+| CI-03 | Top-level contents:read, timeout/concurrency, ubuntu-24.04, persist-credentials:false | least privilege/predictability | policy-workflows | blocking |
+| CI-04 | Strict CI makes SKIP fail, requires pinned versions, no cloud secrets | no silent skips/missing-secret failures | ci.yml, harness | blocking |
+| CI-05 | e2e loads images job's exact built/scanned artifact | cluster bytes match scanned bytes | ci.yml | process |
+| CI-06 | Weekly Monday06:00UTC CI | detect new CVEs, expiry, broken URLs | ci.yml | alert |
+| MUD-01 | Main ruleset requires PR, strict static/test/images/e2e/e2e-platform, no force push | harness every change | ruleset/main.json, repo-guardrails.sh | blocking after publication |
+| MUD-02 | Scanner exceptions require statement/expired_at within approximately7months | bounded review | trivyignore-policy | blocking |
+| MUD-03 | Conventional Commits, one topic/PR, Unreleased CHANGELOG | readable history | PR template | process |
+| DOC-01 | English-only docs/README, exact evidence labels, no self-ratings, UTF-8/LF | prevent v1 false claims/UTF-16 | repo-structure, review | blocking |
+| DOC-02 | Docs updated with code | prevent stale instructions | PR template | process |
+| AGT-01 | Never mutate cloud without explicit human request for task | cost/security | AGENTS.md | process |
+| AGT-02 | Never weaken gates/coverage or add unjustified/unbounded ignores | meaningful harness | AGENTS/checks above | process |
+| LOC-01 | Local app through GitOps/ArgoCD/AppProject dx02v2 only, no direct apply | one owner; v1 had two | deploy-local.sh, gitops probe | blocking in e2e-platform |
+| LOC-02 | Local STRICT mTLS, identity AuthorizationPolicy, NetworkPolicy with HBONE/ambient kubelet probes | identity, not IP alone | local-platform contract-app, mesh probe | blocking |
+| LOC-03 | Alerts use exported app/KSM series with promtool tests | v1 used nonexistent series | promtool-rules, observability | blocking |
+| AGT-03 | Stop/ask for AGENTS-listed situations | costly decisions stay human | AGENTS.md | process |
 
-## Exceções
+Release workflows request GitHub OIDC for Sigstore signing, separately from cloud credentials.
+CI itself receives neither cloud secrets nor cloud authentication.
 
-Uma exceção é um ignore de scanner. Para adicionar uma:
+## Exceptions
 
-1. Confirme que o achado é uma escolha deliberada do lab ou que não há como corrigi-lo agora (não um
-   defeito a corrigir).
-2. Adicione a entrada em `.trivyignore.yaml` com `id`, `paths` ou `purls` (o mais restrito possível),
-   `statement` (por que é aceitável e o que compensa o risco) e `expired_at` em até ~7 meses.
-3. Explique a exceção no PR. O check `trivyignore-policy` rejeita entradas sem justificativa, sem
-   validade, vencidas ou longas demais; o trivy deixa de aplicar uma entrada vencida.
+A scanner exception must:
 
-As outras exclusões são fixas e explicadas no próprio check: o `policy-identifiers` não examina
-`package-lock.json`, `tools/checksums.txt` e `deploy/k8s/schemas` (hashes e exemplos dos CRDs
-oficiais, garantidos pelo `crd-schemas`) e aceita um UUID de teste da API; o `policy-cloud` deixa
-README, ARQUITETURA e CHANGELOG nomearem a outra nuvem, porque comparam a família.
+1. Represent a deliberate tradeoff or a finding currently impossible to fix, not a hidden defect.
+2. Add .trivyignore.yaml id, narrowest paths/purls, statement (acceptance and compensating
+   controls), and expired_at within approximately seven months.
+3. Be explained in the PR. trivyignore-policy rejects missing reasons/dates, expired entries
+   and excessive durations; Trivy no longer applies an expired entry.
 
-Exceções atuais do trivy (verificado em 2026-10-11): nenhuma. O gate das imagens usa
-`--ignore-unfixed`: vulnerabilidades sem correção publicada e as de severidade LOW/MEDIUM não falham o
-build; o harness imprime a contagem completa no resumo de `trivy-image:*` para acompanhamento.
+Other exclusions are fixed and explained in checks. policy-identifiers excludes package-lock.json,
+tools/checksums.txt and generated deploy/k8s/schemas (official hashes/examples verified by
+crd-schemas), and permits an API-test UUID. policy-cloud permits family comparisons in
+README, ARCHITECTURE and CHANGELOG.
 
-## Limites (o que NÃO é garantido)
+Trivy exception baseline checked 2026-10-11: none. The image gate uses --ignore-unfixed.
+Unfixed and LOW/MEDIUM CVEs do not fail builds; full counts remain in trivy-image:* summaries.
 
-- Nada do v2 rodou na Azure: o deploy, o ExternalSecrets com o Key Vault, o Gateway no Application
-  Gateway for Containers, a política de WAF, o TLS com o PostgreSQL (`verify-full`) e o preflight de
-  RBAC foram renderizados, validados e exercitados com `az`/`kubectl`/`kubelogin`/`docker` simulados,
-  não contra a nuvem.
-- O e2e prova o enforcement de NetworkPolicy com o kindnet do kind (kube-network-policies), não com o
-  Cilium do AKS; as regras por CIDR (subnet do AGC e do PostgreSQL) só existem nos overlays `azure*`.
-- O rate limit de escrita fica em memória por réplica da API: com N réplicas o limite efetivo chega a
-  N vezes o configurado.
-- O token de admin é um segredo único e compartilhado (sem usuários, sem rotação automática); trocar o
-  valor no Key Vault exige reiniciar os pods da API depois da sincronização do ESO.
-- O smoke test pelo AGC lê o token de admin do Secret `app-secrets` (o deployer pode ler Secrets) e o
-  mascara nos logs do GitHub Actions; quem pode disparar o deploy pode ver o token.
-- As tags do ACR Basic são mutáveis: o deploy nunca faz push sobre uma tag existente, mas não prova
-  quem a publicou; quem tem `AcrPush` no registry poderia trocar a imagem de um commit.
-- Os tokens do Azure CLI obtidos no começo do deploy valem cerca de uma hora; um deploy que passe
-  disso falha nas últimas chamadas ao cluster.
-- `trivy --ignore-unfixed` não bloqueia CVEs sem correção; o agendamento semanal os reavalia.
-- Não há HTTPS na Azure ainda (listener HTTP no AGC, `planejado`); localmente também não há TLS.
-- Antes do primeiro commit, o `gitleaks` examina só os arquivos visíveis ao git (versionados e não
-  ignorados); depois, todo o histórico.
-- O bit executável dos scripts só é checado para arquivos já no índice do git.
+## Limits
 
-## Como verificar
+- Nothing in v2 ran in Azure: deploy, ESO/Key Vault, AGC Gateway/WAF, PostgreSQL verify-full and
+  RBAC preflight were rendered/validated/stub-tested with az/kubectl/kubelogin/docker, not Azure.
+- kind e2e proves kindnet/kube-network-policies, not AKS Cilium; AGC/PostgreSQL subnet CIDRs
+  exist only in cloud overlays.
+- Write rate limiting is in memory per API replica: N replicas permit up to N times the limit.
+- Admin token is one shared secret, no users/automatic rotation. Restart API Pods after
+  Key Vault/ESO rotation.
+- Cloud smoke never reads/sends the admin token. Deployer RBAC can read app Secrets; access to
+  the identity is sensitive even when scripts avoid printing credentials.
+- Current ACR uses Standard/ABAC-scoped repositories and verified promotion attestations/digests.
+  Historical Basic/AcrPush access did not prove who published a tag. Deployment refuses tag
+  replacement; real registry/admission behavior remains a cloud acceptance test.
+- Azure CLI tokens acquired at deployment start last roughly one hour; longer runs can fail later calls.
+- Trivy --ignore-unfixed does not block unfixed CVEs; weekly CI reevaluates them.
+- Core Azure intentionally uses HTTP; full configures public HTTPS/redirect. Local kind uses lab-CA
+  HTTPS; local proof does not establish public certificate issuance.
+- Before the first commit gitleaks scans Git-visible tracked/unignored files; afterward it also
+  scans full history.
+- Executable-bit checks cover files already in the Git index.
+
+## Verification
 
 ```bash
-make tools                  # ferramentas fixadas em .tools/
+make tools                       # pinned .tools binaries
 HARNESS_STRICT=1 make verify
 HARNESS_STRICT=1 make build
 make e2e
-scripts/harness.sh list     # todos os checks e estágios
+scripts/harness.sh list           # every check and stage
 ```

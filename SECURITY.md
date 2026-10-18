@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through GitHub: **Security > Report a vulnerability** on this repository (private
-vulnerability reporting is enabled when the repository is public, see `docs/PUBLICACAO.md`). Do not
+vulnerability reporting is enabled when the repository is public, see `docs/PUBLISHING.md`). Do not
 open a public issue. Never include credentials, admin tokens, subscription, tenant or object IDs or
 IP addresses; use placeholders.
 

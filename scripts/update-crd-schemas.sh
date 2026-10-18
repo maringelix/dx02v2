@@ -167,7 +167,7 @@ update() {
   find "$SCHEMA_DIR" -mindepth 1 -type d -empty -delete
   cp -R "$WORK_DIR/generated/." "$SCHEMA_DIR/"
   log "updated deploy/k8s/schemas to ALB Controller $version; next: update the date in source.env,"
-  log "HARNESS_STRICT=1 make verify, and the calendar in docs/SUSTENTACAO.md (same version as tx02v2)."
+  log "HARNESS_STRICT=1 make verify, and the calendar in docs/MAINTENANCE.md (same version as tx02v2)."
 }
 
 main() {
