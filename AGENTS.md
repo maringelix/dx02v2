@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Instructions for AI coding agents and humans working in `dx02v2`. `CLAUDE.md` points here; this file
-is the source of truth. The full rule list (pt-BR) is [docs/GUARDRAILS.md](docs/GUARDRAILS.md).
+is the source of truth. The full rule list is [docs/GUARDRAILS.md](docs/GUARDRAILS.md).
 
 ## 1. Mission and context
 
@@ -20,11 +20,13 @@ is the source of truth. The full rule list (pt-BR) is [docs/GUARDRAILS.md](docs/
 - The app also has an overlay and a GitOps deploy for the full local platform of tx02v2 (kind, Istio
   ambient, Argo CD, Prometheus, Loki, Tempo and the OpenTelemetry Collector, Gatekeeper, Trivy
   Operator, chaos): overlay `local-platform`, `scripts/deploy-local.sh` and `make e2e-platform` (CI job
-  `e2e-platform`, [docs/LAB_LOCAL.md](docs/LAB_LOCAL.md)); the platform e2e is `verified in CI` (18
+  `e2e-platform`, [docs/LOCAL_LAB.md](docs/LOCAL_LAB.md)); the platform e2e is `verified in CI` (18
   probes). It is not cloud-mutating: agents may run it, one heavy run at a time (Docker with 8 GB, or 7 GB with
   `LOCAL_SIZE=small`; `make e2e-platform-small` is meant for the CI runner).
-- The interface with `tx02v2` is [docs/CONTRATO.md](docs/CONTRATO.md) (contract v3, owned by tx02v2; the
+- The interface with `tx02v2` is [docs/CONTRACT.md](docs/CONTRACT.md) (contract v5, owned by tx02v2; the
   local lab has its own local contract, `lab-system/lab-contract`).
+
+All public documentation, examples, comments and user-facing messages must remain in English. Start with the [central getting-started guide](https://github.com/maringelix/tx00v2/blob/main/docs/GETTING_STARTED.md).
 
 ## 2. Non-negotiable rules
 
@@ -43,7 +45,7 @@ is the source of truth. The full rule list (pt-BR) is [docs/GUARDRAILS.md](docs/
    why in the PR. The API has no CORS middleware on purpose (same origin).
 5. Keep the contract: changes need coordinated PRs in `tx02v2` and `dx02v2` and a version bump.
 6. Keep parity with `dx01v2` and `dx03v2`: a change to `api/`, `web/` or `e2e/` is ported to all
-   the app repositories, or the PR says why it is Azure-only (docs/SUSTENTACAO.md, parity routine).
+   the app repositories, or the PR says why it is Azure-only (docs/MAINTENANCE.md, parity routine).
 7. Pin every new dependency, action and image (exact npm version + lockfile, 40-char SHA +
    `# vX.Y.Z`, image digest, tool version + SHA256) and update the docs in the same change.
 8. Once the ruleset is on, never push to `main`: pull requests only.
@@ -78,7 +80,7 @@ scripts/lib/            shared bash helpers (common, tools, k8s)
 tools/                  versions.env and checksums.txt of the harness tools
 .github/                ci.yml (static, test, images, e2e, e2e-platform), deploy-azure.yml, ruleset, templates, Dependabot
 .devcontainer/          Node.js 24 + Docker-in-Docker, pinned by digest (runs make tools)
-docs/                   pt-BR docs: architecture, API, contract, runbook, guardrails, harness, sustainment
+docs/                   English docs: architecture, API, contract, runbook, guardrails, harness, maintenance
 FORK.md                 how to fork the lab: what GitHub does not copy, the local lab, your own cloud account
 ```
 
@@ -119,7 +121,7 @@ FORK.md                 how to fork the lab: what GitHub does not copy, the loca
 
 ## 7. Playbooks
 
-**Maintainer / sustentação.** Follow [docs/SUSTENTACAO.md](docs/SUSTENTACAO.md): react to a red
+**Maintainer / maintenance.** Follow [docs/MAINTENANCE.md](docs/MAINTENANCE.md): react to a red
 scheduled CI (often a new CVE in a base image), merge monthly Dependabot PRs, run the quarterly
 review (harness tools, image digests, Node.js/PostgreSQL/Kubernetes/AKS calendar, ALB Controller and
 Gateway API version, kubeconform schemas, kubelogin, ignores close to `expired_at`, parity with
@@ -165,9 +167,9 @@ leave a lab running unattended.
   expectations in `e2e/smoke.mjs`.
 - Change a NetworkPolicy: update `scripts/check-manifests.mjs` and the probes in `scripts/e2e-kind.sh`.
 - Bump the ALB Controller (with tx02v2): `scripts/update-crd-schemas.sh <version>`, then
-  `HARNESS_STRICT=1 make verify` and the calendar in `docs/SUSTENTACAO.md`.
+  `HARNESS_STRICT=1 make verify` and the calendar in `docs/MAINTENANCE.md`.
 - Bump a harness tool: `scripts/update-tool-checksums.sh <tool> <version>`, then `make tools verify`.
-- Add a check: docs/HARNESS.md ("Como adicionar um check").
+- Add a check: docs/HARNESS.md ("Add a check").
 
 ## 9. When to stop and ask a human
 

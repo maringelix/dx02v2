@@ -1,4 +1,4 @@
-// Structural checks of the rendered Kubernetes manifests against contract v4 (docs/CONTRATO.md)
+// Structural checks of the rendered Kubernetes manifests against contract v4 (docs/CONTRACT.md)
 // and the hardening rules of docs/GUARDRAILS.md. Used by the harness check `contract-app`.
 //   node scripts/check-manifests.mjs --params <params.env> --local-params <params.env> local=<file> azure=<file>
 //     azure-waf=<file> azure-full=<file> azure-waf-full=<file> local-platform=<file>
@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { parseAllDocuments } from 'yaml';
 
 const NAMESPACE = 'dx02v2';
-// Kinds the deployer Role of tx02v2 may write (docs/CONTRATO.md). Secrets are written by ESO only.
+// Kinds the deployer Role of tx02v2 may write (docs/CONTRACT.md). Secrets are written by ESO only.
 const DEPLOYER_KINDS = new Set([
   'ConfigMap',
   'AuthorizationPolicy',
@@ -26,7 +26,7 @@ const DEPLOYER_KINDS = new Set([
 // dx02v2 started as a copy of the AWS app dx01v2: nothing of that path may come back.
 const OTHER_CLOUD =
   /(^|[^a-z0-9])(aws|eks|ecr|rds|elbv2|wafv2|tx01v2)([^a-z0-9]|$)|amazonaws|alb\.ingress\.kubernetes\.io/i;
-// The only annotation the azure overlays may carry (docs/CONTRATO.md); deploy-params is dropped by kustomize.
+// The only annotation the azure overlays may carry (docs/CONTRACT.md); deploy-params is dropped by kustomize.
 const AGC_ID_ANNOTATION = 'alb.networking.azure.io/alb-id';
 
 const failures = [];
@@ -365,7 +365,7 @@ function azureChecks(overlay, { objs }, params, waf) {
     `${overlay}: web image from params`,
   );
 
-  // Gateway API on Application Gateway for Containers, bring-your-own deployment (docs/CONTRATO.md).
+  // Gateway API on Application Gateway for Containers, bring-your-own deployment (docs/CONTRACT.md).
   const gateways = all(objs, 'Gateway');
   eq(
     gateways.map((g) => g.metadata?.name),

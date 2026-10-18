@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRATO.md).
+# Deploys dx02v2 to the AKS lab cluster of tx02v2 (docs/CONTRACT.md).
 # CLOUD-MUTATING and billable: promotes a signed GHCR release to ACR and makes the ALB Controller program Application
 # Gateway for Containers (AGC), which with its WAF is the biggest cost item of the Azure lab. Run it
 # only on purpose, after the tx02v2 apply + platform steps; the teardown is the tx02v2 destroy.
@@ -124,13 +124,13 @@ param() { printf '%s' "${PARAM[$1]}"; }
 # expect_param KEY VALUE -> the fixed names of the contract (never identifiers, safe to print).
 expect_param() {
   [[ "$(param "$1")" == "$2" ]] ||
-    die "App Configuration $APPCONFIG_PREFIX$1 is '$(param "$1")' but the manifests expect '$2' (docs/CONTRATO.md)"
+    die "App Configuration $APPCONFIG_PREFIX$1 is '$(param "$1")' but the manifests expect '$2' (docs/CONTRACT.md)"
 }
 
 # expect_format KEY REGEX -> values that carry identifiers are validated without printing them.
 expect_format() {
   [[ "$(param "$1")" =~ $2 ]] ||
-    die "App Configuration $APPCONFIG_PREFIX$1 does not have the format of the contract (docs/CONTRATO.md)"
+    die "App Configuration $APPCONFIG_PREFIX$1 does not have the format of the contract (docs/CONTRACT.md)"
 }
 
 write_summary() { # RESULT
@@ -212,7 +212,7 @@ preflight() {
   [[ -n "${AZURE_APPCONFIG_ENDPOINT:-}" ]] ||
     die "AZURE_APPCONFIG_ENDPOINT is required (the App Configuration endpoint output by tx02v2)"
   [[ "$AZURE_APPCONFIG_ENDPOINT" =~ $APPCONFIG_ENDPOINT_PATTERN ]] ||
-    die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (docs/CONTRATO.md)"
+    die "AZURE_APPCONFIG_ENDPOINT must look like https://tx02v2-lab-<suffix>.azconfig.io (docs/CONTRACT.md)"
   [[ "$DEPLOY_MODE" == auto || "$DEPLOY_MODE" == gitops || "$DEPLOY_MODE" == push ]] ||
     die "DEPLOY_MODE must be auto, gitops or push"
   [[ "$PLATFORM_PROFILE" == core || "$PLATFORM_PROFILE" == full ]] ||
@@ -247,7 +247,7 @@ read_contract() {
       }
     });' <<<"$out")
   for n in "${CONTRACT_KEYS[@]}"; do
-    [[ -n "${PARAM[$n]:-}" ]] || die "the App Configuration key $APPCONFIG_PREFIX$n is missing (docs/CONTRATO.md)"
+    [[ -n "${PARAM[$n]:-}" ]] || die "the App Configuration key $APPCONFIG_PREFIX$n is missing (docs/CONTRACT.md)"
   done
   for n in agc/id waf/policy-id deploy/principal-id; do
     mask "$(param "$n")"
@@ -273,7 +273,7 @@ read_contract() {
   fi
   if [[ "$PLATFORM_PROFILE" == full ]]; then
     [[ "$(param dns/hostname)" != disabled ]] ||
-      die "profile full requires tx02v2 public DNS and a ready ACME certificate (docs/CONTRATO.md)"
+      die "profile full requires tx02v2 public DNS and a ready ACME certificate (docs/CONTRACT.md)"
   fi
   DNS_HOSTNAME="$(param dns/hostname)"
   expect_format waf/policy-id "${K8S_PARAM_PATTERN[WAF_POLICY_ID]}"
@@ -312,7 +312,7 @@ connect_cluster() {
   export KUBECONFIG="$WORK_DIR/kubeconfig"
   az aks get-credentials --subscription "$SUBSCRIPTION_ID" --resource-group "$(param resource-group)" \
     --name "$(param cluster-name)" --file "$KUBECONFIG" --only-show-errors >/dev/null ||
-    die "cannot fetch the kubeconfig of $(param cluster-name) (this principal needs the Azure Kubernetes Service Cluster User Role on it, docs/CONTRATO.md)"
+    die "cannot fetch the kubeconfig of $(param cluster-name) (this principal needs the Azure Kubernetes Service Cluster User Role on it, docs/CONTRACT.md)"
   # Local accounts are disabled: kubectl authenticates with Entra ID through the Azure CLI session.
   kubelogin convert-kubeconfig -l azurecli --kubeconfig "$KUBECONFIG"
   # Discovery is open to every authenticated user: the API groups of the platform layer must be served.

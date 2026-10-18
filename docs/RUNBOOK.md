@@ -1,162 +1,188 @@
-# Runbook do dx02v2
+# dx02v2 runbook
 
-Passo a passo para desenvolver e testar o app localmente (npm, compose, kind) e para publicá-lo no
-cluster AKS do tx02v2. O caminho local é grátis e `verificado localmente`; o deploy na Azure nunca foi
-executado (`não executado em nuvem (v2)`): você será a primeira evidência.
+Develop/test the app with npm, Compose and kind, then publish it to tx02v2 AKS.
+Start with the [central getting-started guide](https://github.com/maringelix/tx00v2/blob/main/docs/GETTING_STARTED.md).
+The free local path is verified locally/in CI as listed in README; Azure
+deployment remains `not run in the cloud (v2)`. Your cloud run supplies evidence.
 
-## 1. Pré-requisitos locais
+## 1. Local prerequisites
 
-- Docker e o devcontainer (`.devcontainer/devcontainer.json`, com Docker-in-Docker), ou Linux/WSL 2
-  com Docker, bash >= 4.4, Node.js 24 (`.nvmrc`), curl, unzip, xz, git e make.
-- `make tools` instala trivy, hadolint, actionlint, shellcheck, kubeconform, gitleaks, kind, kubectl e
-  kubelogin fixados em `.tools/`.
-- Portas locais: 8080 (compose, `WEB_PORT`, só 127.0.0.1), 15432 (PostgreSQL de desenvolvimento, só
-  127.0.0.1), 5173 (Vite, só 127.0.0.1) e 3000/9464 (API em desenvolvimento, todas as interfaces).
+- Docker/devcontainer (Docker-in-Docker), or Linux/Ubuntu WSL2 with Docker,
+  bash>=4.4, Node 24 (.nvmrc), curl/unzip/xz/git/make.
+- make tools installs pinned Trivy, hadolint, actionlint, shellcheck,
+  kubeconform, Gitleaks, kind, kubectl and kubelogin under .tools/.
+- Ports: Compose8080 (WEB_PORT, loopback), dev PostgreSQL 15432 (loopback),
+  Vite 5173 (loopback), dev API 3000/metrics9464 (all interfaces).
 
-## 2. Desenvolvimento com npm workspaces
+## 2. npm workspace development
 
-Um único `package-lock.json` na raiz; os workspaces são `api` e `web`.
+One root package-lock.json; workspaces api/web.
 
 ```bash
 npm ci
-# PostgreSQL 17 descartável em 127.0.0.1:15432, senha e token aleatórios só nesta sessão do shell
+# Disposable PostgreSQL 17; random password/token exist only in this shell session.
 export DB_PASSWORD="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 export ADMIN_TOKEN="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 docker run -d --rm --name dx02v2-dev-pg -p 127.0.0.1:15432:5432 \
   -e POSTGRES_DB=dx02v2 -e POSTGRES_USER=dx02v2 -e POSTGRES_PASSWORD="$DB_PASSWORD" \
   postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
 export DB_HOST=127.0.0.1 DB_PORT=15432 DB_NAME=dx02v2 DB_USER=dx02v2
-node api/src/migrate.ts            # migrações (o Node.js 24 executa TypeScript direto)
-npm run dev --workspace api        # API na porta 3000, métricas na 9464, recarrega ao salvar
-npm run dev --workspace web        # outro terminal: Vite em http://127.0.0.1:5173 (/api → :3000)
-docker rm -f dx02v2-dev-pg         # ao terminar
+node api/src/migrate.ts           # Node 24 executes TypeScript directly
+npm run dev --workspace api       # API 3000, metrics9464, reload on save
+npm run dev --workspace web       # another terminal; 127.0.0.1:5173, /api -> :3000
+docker rm -f dx02v2-dev-pg        # after finishing
 ```
 
-Comandos úteis: `npm run lint`, `npm run typecheck`, `npm run format`, `npm run build`; testes:
-`npm run test:coverage --workspace web` e, para a API, que usa o banco de `DB_*` e **apaga e recria
-as tabelas**, um banco cujo nome termina em `_test` (os testes recusam qualquer outro nome):
+Useful commands: npm run lint/typecheck/format/build. Web tests:
+`npm run test:coverage --workspace web`. API tests use DB_* and **drop/recreate
+tables**; they reject database names not ending in _test:
 
 ```bash
 docker exec dx02v2-dev-pg createdb -U dx02v2 dx02v2_test
 DB_NAME=dx02v2_test npm run test:coverage --workspace api
 ```
 
-O gate completo é `HARNESS_STRICT=1 make verify`: sem `DB_HOST` ele sobe um PostgreSQL descartável;
-com `DB_*` exportadas, usa esse banco e recusa um `DB_NAME` que não termine em `_test` (neste shell:
-`env -u DB_HOST HARNESS_STRICT=1 make verify`).
+Strict verify starts disposable PostgreSQL when DB_HOST is unset; exported DB_*
+selects that database and must use _test. In the shell above, use
+`env -u DB_HOST HARNESS_STRICT=1 make verify`.
 
-## 3. Stack do compose (projeto `dx02v2-dev`)
+## 3. Compose stack (dx02v2-dev)
 
 ```bash
-scripts/dev-env.sh                                  # .env com DB_PASSWORD e ADMIN_TOKEN aleatórios (600)
-docker compose -p dx02v2-dev up -d --build --wait   # db → migrate → api → web
-scripts/compose-smoke.sh                            # e2e/smoke.mjs contra http://127.0.0.1:8080
-docker compose -p dx02v2-dev down -v                # remove containers, rede e volume do banco
+scripts/dev-env.sh                                # random .env secrets, mode600
+docker compose -p dx02v2-dev up -d --build --wait # db -> migrate -> api -> web
+scripts/compose-smoke.sh                          # smoke at http://127.0.0.1:8080
+docker compose -p dx02v2-dev down -v              # containers/network/database volume
 ```
 
-- Só o web é publicado (`127.0.0.1:${WEB_PORT:-8080}`); a API e o banco ficam em redes internas.
-- Containers com root filesystem somente leitura, `cap_drop: [ALL]` e `no-new-privileges`.
-- O modo admin da página aceita o `ADMIN_TOKEN` do `.env` (fica só na memória da aba).
-- Trocar os segredos: `scripts/dev-env.sh --force` e depois `down -v` (o volume guarda a senha antiga).
-- Outra porta: `WEB_PORT=18080 scripts/dev-env.sh --force`.
+- Only web publishes `127.0.0.1:${WEB_PORT:-8080}`; API/database use internal networks.
+- Read-only root filesystems, cap_drop ALL, no-new-privileges.
+- Page admin mode accepts .env ADMIN_TOKEN, stored only in tab memory.
+- Rotate with dev-env.sh --force then down -v; the volume retains its old password.
+- Another port: WEB_PORT=18080 scripts/dev-env.sh --force.
 
-## 4. Ponta a ponta no kind (`make e2e`)
+## 4. kind end to end (make e2e)
 
 ```bash
 make tools
-make e2e                         # cria dx02v2-e2e, testa e apaga o cluster
-KEEP_CLUSTER=1 make e2e          # mantém o cluster para investigar
+make e2e                        # create dx02v2-e2e, test, delete cluster
+KEEP_CLUSTER=1 make e2e         # keep for investigation
 kind get kubeconfig --name dx02v2-e2e > /tmp/dx02v2-e2e.kubeconfig
 KUBECONFIG=/tmp/dx02v2-e2e.kubeconfig kubectl -n dx02v2 get pods,svc,networkpolicy
 kind delete cluster --name dx02v2-e2e
 ```
 
-O script (`scripts/e2e-kind.sh`) constrói as imagens `dx02v2-api:e2e` e `dx02v2-web:e2e`, cria o
-cluster a partir de `kind/kind-config.yaml` (nó v1.36.4 por digest), carrega as imagens, cria os
-Secrets com valores aleatórios, aplica `deploy/k8s/overlays/local`, espera os rollouts, prova que o
-namespace rejeita um pod privilegiado, roda o smoke test por um port-forward para `svc/web` e testa
-as NetworkPolicies com pods descartáveis. Em caso de falha, os diagnósticos ficam em
-`$TMPDIR/dx02v2-harness/e2e-diagnostics`.
+e2e-kind.sh builds dx02v2-api:e2e/web:e2e, creates digest-pinned kind 1.36.4,
+loads images, generates Secrets, applies local overlay, waits for rollouts,
+requires privileged Pod rejection, runs smoke through svc/web port-forward,
+and probes NetworkPolicies with disposable Pods. Failure diagnostics:
+$TMPDIR/dx02v2-harness/e2e-diagnostics.
 
-## 5. Azure: pré-requisitos
+## 5. Azure prerequisites
 
-> **Custo**: o app roda no lab do tx02v2, e o maior item é o Application Gateway for Containers com o
-> WAF (cerca de US$0,28 por hora; US$0,155 sem o WAF; preços de referência da Azure Retail Prices API,
-> eastus2, 2026-10-11), além dos nós do AKS e do PostgreSQL. Ver o `docs/CUSTOS.md` do tx02v2 e a
-> calculadora oficial. Destrua no mesmo dia.
+> Cost: AGC/WAF is the largest tx02v2 item (historical eastus2 reference
+> USD0.279/hour, USD0.155 without WAF, Retail Prices API 2026-10-11), plus
+> AKS/PostgreSQL. Read tx02v2 COSTS.md and current calculator. Destroy the same day.
 
-1. tx02v2: bootstrap, apply e plataforma concluídos (runbook do tx02v2): ALB Controller com a
-   GatewayClass `azure-alb-external`, External Secrets Operator com o ClusterSecretStore
-   `azure-key-vault`, namespace `dx02v2` com a Role `dx02v2-deployer` e a RoleBinding
-   `dx02v2-deployers`. O object ID da identidade `dx02v2-gha-deploy` precisa estar na RoleBinding (o
-   tx02v2 faz isso); para deploy a partir de um laptop, o seu object ID também (`app_deployer_principal_ids`
-   do tx02v2), além dos papéis Azure da seção 6.
-2. Repositório dx02v2 público com `scripts/repo-guardrails.sh` aplicado (environment `lab` com
-   revisor obrigatório e só `main`; o sujeito OIDC aceito pela credencial federada é
-   `repo:<owner>/dx02v2:environment:lab`).
-3. Variáveis do GitHub (seção 6).
+1. Complete TX bootstrap/apply/platform: ALB Controller/GatewayClass
+   azure-alb-external, ESO/store azure-key-vault, dx02v2 namespace/deployer Role/
+   RoleBinding. TX adds the deploy identity object ID. Laptop deployers also
+   need app_deployer_principal_ids and section 6 Azure roles.
+2. Public fork with repo-guardrails applied: lab required reviewer/main only.
+   Federation trusts immutable
+   `repo:<owner>@<owner-id>/dx02v2@<repository-id>:environment:lab`,
+   with matching bootstrap numeric IDs.
+3. Configure section 6 variables. No static Azure client-secret is used.
+4. Full requires matching full platform, sized nodes, delegated public DNS/CNAME
+   and ready ACME certificate. TX RUNBOOK owns installation, Velero key escrow
+   and FinOps/pricing prerequisites.
+5. DR additionally requires the secondary contract output and fencing/promotion
+   procedure in both CONTINUITY runbooks; target selection does not promote data.
 
-## 6. Variáveis do GitHub e papéis Azure
+## 6. GitHub variables and Azure roles
 
-Settings > Secrets and variables > Actions > **Variables** (aparecem nos logs: nada privado; o
-workflow confere o formato antes de tudo e o `azure/login` mascara o client ID).
+Settings > Secrets and variables > Actions > **Variables**. These values appear
+in logs; do not store credentials/private operator information here. Workflow
+validates formats first and masks identity IDs.
 
-| Variável | Exemplo | Uso |
+| Variable | Example | Use |
 |---|---|---|
-| `AZURE_CLIENT_ID` | `00000000-0000-0000-0000-000000000000` | client ID da managed identity `dx02v2-gha-deploy` (output do bootstrap do tx02v2) |
-| `AZURE_TENANT_ID` | `00000000-0000-0000-0000-000000000000` | tenant do Entra ID |
-| `AZURE_SUBSCRIPTION_ID` | `00000000-0000-0000-0000-000000000000` | assinatura do lab (precisa ser a do `agc/id` da App Configuration) |
-| `AZURE_APPCONFIG_ENDPOINT` | `https://tx02v2-lab-00000000.azconfig.io` | endpoint do store do contrato (output do tx02v2) |
+| AZURE_CLIENT_ID | 00000000-0000-0000-0000-000000000000 | dx02v2-gha-deploy managed identity clientID, bootstrap output |
+| AZURE_TENANT_ID | 00000000-0000-0000-0000-000000000000 | Entra tenant |
+| AZURE_SUBSCRIPTION_ID | 00000000-0000-0000-0000-000000000000 | Must match contract agc/id subscription |
+| AZURE_APPCONFIG_ENDPOINT | https://tx02v2-lab-00000000.azconfig.io | Primary contract endpoint, TX output |
+| AZURE_DR_APPCONFIG_ENDPOINT | TX dr_appconfig_endpoint output | Required only target=secondary |
 
-Papéis Azure do principal que faz o deploy (o tx02v2 atribui à `dx02v2-gha-deploy`): `Container
-Registry Repository Writer` com condições ABAC para os dois repositórios do app, `Azure Kubernetes
-Service Cluster User Role` no cluster e `App Configuration Data Reader` no store. A partir de um
-laptop, o seu usuário precisa dos mesmos papéis: o tx02v2 os atribui a
-cada object ID em `app_deployer_principal_ids`, junto com a RoleBinding (`docs/CONTRATO.md`).
+TX assigns Container Registry Repository Writer with separate ABAC conditions
+for dx02v2/api/web, AKS Cluster User on the cluster, App Configuration Data Reader
+on the store. Human app_deployer_principal_ids receive the same roles plus
+RoleBinding (CONTRACT.md). No Key Vault role is granted to the deployer.
+Infrastructure/operator secrets belong in TX, including ranges/admins/Slack/
+Velero password; application credentials stay in Key Vault/ESO.
 
-## 7. Deploy
+## 7. Publish, promote and deploy
 
-Primeiro, publique um release a partir de `main`: abra `publish-images`, informe o ID de uma execução
-bem-sucedida do `ci.yml` para o mesmo SHA de `main`, e aguarde a publicação dos digests assinados.
-Depois, abra `deploy-azure`, escolha `main` e informe o ID da execução `publish-images`. O workflow
-valida o CI de origem, os SBOMs e as attestations antes de solicitar aprovação do environment `lab`;
-após a aprovação, valida tudo novamente antes de pedir credenciais Azure. Escolha `platform_profile`
-como `core` ou `full` e `deploy_mode` como `auto`, `gitops` ou `push`. `auto` usa GitOps quando encontra
-a Application `dx02v2`; se ela não existe, aplica o overlay diretamente. Falhas de permissão ou de
-conexão com o Argo CD não são tratadas como ausência. O perfil `full` exige a plataforma full do
-tx02v2, o waypoint ambient e a policy de assinatura; o workflow promove e atesta as imagens do ACR
-antes de iniciar o deploy. A homologação cloud ocorre depois da integração dos 22 PRs.
+First run **publish-images from main**, with ci_run_id pointing to a successful
+current-main push ci.yml run; wait for signed publication. A PR run is insufficient.
+Then run deploy-azure from main with release_run_id equal to the successful
+publish-images run ID. It verifies source CI, SBOMs and attestations before lab
+approval and rechecks after approval before Azure authentication.
 
-O job `deploy-azure` primeiro promove as imagens verificadas para o ACR, gera e verifica uma attestation
-que vincula os digests de origem e destino; depois chama o script de deploy. O script
-`scripts/deploy-azure.sh`:
+Choose platform_profile=core|full, deploy_mode=auto|gitops|push,
+target=primary|secondary. Auto uses GitOps when Application dx02v2 exists,
+otherwise direct apply; permission/connection failures are not treated as absence.
+Full requires TX full, ambient waypoint and signature policy. Workflow promotes
+and attests final ACR images before deployment. Cloud homologation follows
+construction/integration; delivery of the planned PRs does not itself prove runtime.
 
-1. valida a execução de publicação, o CI de origem, os cinco checks obrigatórios, os hashes dos SBOMs e as attestations de provenance e SPDX;
-2. lê as 17 chaves `tx02v2/lab/*` da App Configuration e confere grupo de recursos, cluster, segredos, DNS e formatos;
-3. obtém kubeconfig temporário e confere API groups e RBAC do namespace e, no modo GitOps, o direito de atualizar a Application `dx02v2`;
-4. confere a imagem GHCR com o release, envia a mesma imagem ao ACR sem rebuild, valida o image ID e recusa substituir uma tag SHA por outra imagem;
-5. cria o ConfigMap `azure-pg-ca` com as três raízes verificadas, renderiza e valida `azure`, `azure-waf`, `azure-full` ou `azure-waf-full`, configura os valores reais em `spec.source.kustomize` e publica a revisão em `gitops/azure` (ou aplica direto no modo `push`);
-6. espera a Application estar `Synced` e `Healthy` no commit publicado, os ExternalSecrets e rollouts, e confere os digests nos Deployments;
-7. espera o Gateway `Programmed` e, com WAF, a política `Accepted`; roda `e2e/smoke.mjs` pelo AGC. No perfil full, usa o hostname HTTPS público e confere o redirect HTTP 301. No core, usa o FQDN HTTP do frontend. O token de admin não é lido nem enviado pelo script.
+```bash
+gh workflow run publish-images.yml --repo <owner>/dx02v2 --ref main -f ci_run_id=<successful-main-CI-run-ID>
+# Wait for successful publication, then:
+gh workflow run deploy-azure.yml --repo <owner>/dx02v2 --ref main \
+  -f release_run_id=<publisher-run-ID> -f platform_profile=core -f deploy_mode=auto -f target=primary
+```
 
-No perfil `full`, a rota interna `mesh-demo` demonstra divisão de tráfego 80/20 entre `mesh-stable`
-e `mesh-canary`, retries limitados e ejeção do canário após falhas. O job de deploy não executa essa
-sonda automaticamente; acompanhe os logs do app e os checks do `tx02v2` para estudar a malha.
+The workflow promotes verified images and signs/verifies an attestation binding
+source/destination digests. Deployment then:
 
-Para executar manualmente de um laptop, obtenha e extraia o artefato do release e configure
-`RELEASE_DIR`, `RELEASE_RUN_ID`, `GITHUB_REPOSITORY`, `GITHUB_ACTOR` e um `GH_TOKEN` com permissões
-`actions:read`, `attestations:read` e `packages:read`. Autentique o Docker no GHCR e o Git para publicar
-`gitops/azure`; depois faça `az login`, selecione a assinatura do lab e rode:
+1. Verifies publisher/source CI and six release-required checks (static, test,
+   images, e2e, e2e-platform, continuity), SBOM hashes, provenance and SPDX.
+   CI additionally runs e2e-platform-small.
+2. Reads 17 tx02v2/lab keys, checking group/cluster/secrets/DNS/formats.
+3. Gets temporary kubeconfig and preflights namespace API groups/RBAC; GitOps
+   also requires update permission on Application dx02v2.
+4. Checks approved GHCR image, transfers without rebuild, verifies imageID,
+   refuses a commit tag pointing to another image. Registry manifest digests
+   may change; promotion attestation binds both.
+5. Creates azure-pg-ca from three verified roots; renders/validates azure,
+   azure-waf, azure-full or azure-waf-full. Sets real live kustomize values and
+   publishes revision in gitops/azure or gitops/azure-dr; push applies directly.
+6. Waits Synced/Healthy at the published commit, ExternalSecrets/rollouts and
+   correct Deployment digests.
+7. Waits Gateway Programmed and optional WAF Accepted; runs smoke through AGC.
+   Full uses public HTTPS and HTTP 301 redirect (secondary checks chosen Gateway
+   with --resolve/SNI before DNS cutover); core uses frontend HTTP.
+   The script neither reads nor sends the admin token.
 
-    make tools
-    printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-    AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<sufixo>.azconfig.io scripts/deploy-azure.sh
+Full's internal mesh-demo route demonstrates 80/20 stable/canary, bounded retries
+and canary ejection after failures. The deploy job does not automatically run
+this lesson; inspect app logs/TX checks to study it.
 
-Sem Argo CD, use `DEPLOY_MODE=push AZURE_APPCONFIG_ENDPOINT=... scripts/deploy-azure.sh`. Para
-implantar manualmente no perfil full, use apenas digests que já tenham a attestation de promoção
-assinada pelo workflow em `main`; a execução manual do script não cria essa assinatura.
+For manual laptop execution, obtain/extract the verified release artifact and set
+RELEASE_DIR, RELEASE_RUN_ID, GITHUB_REPOSITORY, GITHUB_ACTOR and GH_TOKEN with
+actions:read/attestations:read/packages:read. Authenticate Docker to GHCR and Git
+for publishing gitops/azure; az login/select dedicated subscription, then:
 
-## 8. Conferir
+```bash
+make tools
+printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+AZURE_APPCONFIG_ENDPOINT=https://tx02v2-lab-<suffix>.azconfig.io scripts/deploy-azure.sh
+```
+
+Without Argo CD, set DEPLOY_MODE=push. Manual full deployment must use digests
+already attested by the main workflow; the local script does not issue signatures.
+
+## 8. Inspect
 
 ```bash
 az aks get-credentials --resource-group tx02v2-lab --name tx02v2-lab --file /tmp/dx02v2-lab.kubeconfig
@@ -164,44 +190,44 @@ kubelogin convert-kubeconfig -l azurecli --kubeconfig /tmp/dx02v2-lab.kubeconfig
 export KUBECONFIG=/tmp/dx02v2-lab.kubeconfig
 kubectl -n dx02v2 get pods,gateway,httproute,externalsecrets,hpa
 kubectl -n dx02v2 get healthcheckpolicy,webapplicationfirewallpolicy
+# Core HTTP; full uses your configured HTTPS hostname with certificate verification.
 curl -fsS "http://$(kubectl -n dx02v2 get gateway dx02v2 -o jsonpath='{.status.addresses[0].value}')/api/info"
 ```
 
-Traces (contrato v2): depois de algumas requisições, o serviço `dx02v2-api` aparece no Application
-Insights `tx02v2-lab-traces` (Transaction search). O caminho é API →
-`opentelemetry-collector.observability` (OTLP/HTTP, porta 4318) → Application Insights; o Collector, a
-identidade e o papel são do tx02v2.
+After requests, service dx02v2-api appears in Application Insights
+tx02v2-lab-traces Transaction search. Flow: API → Collector.observability OTLP/HTTP
+4318 → Insights; Collector/identity/role belong to TX.
 
-## 9. Desligar
+## 9. Stop
 
-O teardown é o do tx02v2 (workflow de destroy + checagem de sobras), que remove o AGC, o AKS, o
-PostgreSQL e o ACR. Para tirar só a entrada do app e manter o cluster:
-`kubectl -n dx02v2 delete gateway dx02v2` (o AGC e o frontend continuam do tx02v2 e continuam
-cobrando).
+TX destroy/leftover workflow removes AGC/AKS/PostgreSQL/ACR. Removing only app
+ingress while retaining cluster needs GitOps reconciliation stopped first:
+otherwise self-heal recreates Gateway. Then delete Gateway dx02v2. AGC/frontend
+remain TX-owned and still incur charges. Follow TX RUNBOOK for full teardown,
+PVC cleanup, soft-deleted names and Owner-level leftover checks.
 
-## 10. Problemas comuns
+## 10. Troubleshooting
 
-| Sintoma | Causa provável | O que fazer |
+| Symptom | Likely cause | Action |
 |---|---|---|
-| `the App Configuration key ... is missing` | tx02v2 não aplicado, ou endpoint errado | aplique o tx02v2 ou corrija `AZURE_APPCONFIG_ENDPOINT` |
-| `cannot read the App Configuration keys` | sem `App Configuration Data Reader` no store | papéis da seção 6 |
-| `logged in to another subscription` | `az` em outra assinatura | `az account set --subscription <assinatura do lab>` |
-| `AADSTS700024: Client assertion is not within its valid time range` | o token OIDC do GitHub expirou antes de o `az` obter um token novo | rode o workflow de novo; não coloque passos lentos entre o `azure/login` e o deploy |
-| `the cluster does not serve ...` | camada de plataforma do tx02v2 não instalada | rode o workflow de plataforma do tx02v2 |
-| `this principal cannot deploy to namespace dx02v2 (...)` | sem RoleBinding `dx02v2-deployers` para este object ID, ou regra faltando na Role | confira a plataforma do tx02v2; a Role usa os plurais dos CRDs do AGC, `healthcheckpolicy` e `webapplicationfirewallpolicy` (`docs/CONTRATO.md`) |
-| `docker login to ... failed` | sem Repository Writer para `dx02v2/api` e `dx02v2/web` | papéis da seção 6 |
-| `refusing https://...: SHA-1 thumbprint ...` | a raiz baixada não é a do contrato | pare: confira a página "Azure Certificate Authority details"; mudar a raiz é mudança de contrato |
-| ExternalSecret não fica `Ready` | ClusterSecretStore, identidade do ESO ou segredo ausente | `kubectl -n dx02v2 describe externalsecret db-credentials`; confira a plataforma do tx02v2 |
-| initContainer `migrate` falha com erro de TLS | ConfigMap `azure-pg-ca` ausente, ou `host` do segredo não é o FQDN do servidor | o script recria o ConfigMap; confira o `host` em `tx02v2-lab-db-app` |
-| Gateway sem `Programmed` | ALB Controller, `agc/id` ou `agc/frontend-name` errados | `kubectl -n dx02v2 describe gateway dx02v2` (eventos do controller) |
-| WebApplicationFirewallPolicy sem `Accepted` | SecurityPolicy do AGC no tx02v2, ou política em outra assinatura/região | `kubectl -n dx02v2 describe webapplicationfirewallpolicy dx02v2` |
-| Smoke com 403 em tudo | regra do WAF (Bot Manager, regra personalizada) | logs do WAF no tx02v2; nenhuma regra pode bloquear o smoke (contrato) |
-| Smoke falha em `X-Request-Id` | o AGC não substituiu o `x-request-id` como a documentação descreve | registre no `cloud_run_report`; a asserção muda nos dois repositórios só com evidência |
-| `ImagePullBackOff` | a identidade kubelet do AKS sem `AcrPull` no registry | o tx02v2 atribui esse papel no apply (contrato); confira o apply e as atribuições do registry |
-| Nenhum trace no Application Insights | Collector ausente (plataforma antiga do tx02v2, contrato v1) ou o Entra ID recusou a ingestão | `kubectl -n observability get pods`; logs do Collector (`kubectl -n observability logs deployment/opentelemetry-collector`); a API nunca falha por isso: os spans só se perdem |
+| App Configuration key missing | TX unapplied/wrong endpoint | Complete TX or fix endpoint |
+| Cannot read keys | Missing store Data Reader | Section 6 roles |
+| Logged into another subscription | Wrong az selection | az account set --subscription <lab-subscription> |
+| AADSTS700024 expired assertion | GitHub OIDC expired before new az token | Rerun; no slow steps between azure/login/deploy |
+| Cluster does not serve API | TX platform absent | Install platform |
+| Principal cannot deploy to dx02v2 | Missing object-ID RoleBinding or Role rule | Check TX platform; exact AGC plurals healthcheckpolicy/webapplicationfirewallpolicy |
+| Docker registry login failed | Missing app-repository Writer | Section 6 |
+| Refusing root SHA-1 | Downloaded root differs from contract | Stop; inspect Azure CA details. Root changes require contract |
+| ExternalSecret not Ready | Missing store/ESO identity/secret | describe externalsecret db-credentials; inspect TX |
+| migrate TLS error | Missing azure-pg-ca or non-FQDN host | Script recreates CA; check Key Vault host |
+| Gateway not Programmed | ALB/AGC ID/frontend error | describe gateway and controller events |
+| WAF policy not Accepted | TX SecurityPolicy or wrong subscription/region | describe webapplicationfirewallpolicy |
+| Smoke403 everywhere | Bot Manager/custom WAF rule | Inspect WAF logs; contract requires smoke allowed |
+| Request-ID smoke failure | AGC behavior differs from docs | Record cloud_run_report; change assertions only with evidence |
+| ImagePullBackOff | Missing kubelet conditional Repository Reader | Inspect apply/ABAC grants on both app repos, not registry-wide AcrPull |
+| No Insights trace | Missing Collector/old v1 platform or Entra ingestion denied | Get observability Pods/Collector logs; API continues, spans are lost |
 
-## 11. Registro
+## 11. Record
 
-Abra uma issue com o template **Cloud run report**: data, região, commits do dx02v2/tx02v2, versão do
-ALB Controller, passos, duração, custo observado, saída do smoke test, problemas e a saída (redigida)
-da checagem de sobras do tx02v2.
+Create Cloud run report with date/region, DX/TX SHAs, ALB version, steps,
+duration, observed cost, smoke output/problems and redacted TX leftovers.
