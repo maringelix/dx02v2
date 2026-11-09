@@ -39,14 +39,14 @@ Historical snapshot, checked 2026-10-11; preserve dates while verifying live sou
 
 | Component | Version | Support end | Source | Action |
 |---|---|---|---|---|
-| Node.js | 24 (.nvmrc; images 24.21.0) | 2028-04-30 | [Node schedule](https://github.com/nodejs/Release#release-schedule) | move to 26 after LTS with time to spare, coordinated across apps; section 5.3 |
+| Node.js | 24 (.nvmrc; images 24.22.2, 2026-11-09) | 2028-04-30 | [Node schedule](https://github.com/nodejs/Release#release-schedule) | move to 26 after LTS with time to spare, coordinated across apps; section 5.3 |
 | Node.js | 26 | LTS 2026-10-28; end 2029-04-30 | same | candidate for first quarterly review after 2026-10-28 |
-| TypeScript | 6.0.3 | no published date | [typescript-eslint support](https://typescript-eslint.io/users/dependency-versions) | retain >=4.8.4 <6.1.0 for typescript-eslint 8.71; Dependabot ignores TS minor/major |
-| React/Vite/Vitest | 19.3/8.3/5.0 | no published calendar | react.dev, vite.dev, vitest.dev | separate major PRs; read migration guides |
+| TypeScript | 6.0.3 | no published date | [typescript-eslint support](https://typescript-eslint.io/users/dependency-versions) | retain >=4.8.4 <6.1.0 for typescript-eslint 8.72; Dependabot ignores TS minor/major |
+| React/Vite/Vitest | 19.3/8.3/5.1 | no published calendar | react.dev, vite.dev, vitest.dev | separate major PRs; read migration guides |
 | Express | 5.3 | active 5.x | [support policy](https://expressjs.com/en/support/) | Dependabot |
-| OpenTelemetry JS | @opentelemetry/api 1.9.1; sdk-trace-node/resources 2.12.0; exporter-trace-otlp-http 0.223.0; semantic-conventions 1.43.0 | stable API 1.x/SDK 2.x; experimental exporter 0.x; fixes only current line, no calendar | [OTel JS releases](https://github.com/open-telemetry/opentelemetry-js/releases) | bump together across all three apps; SDK 2.x and exporter 0.2xx share releases; exporter minor may break; run telemetry/tracing/platform tests |
+| OpenTelemetry JS | @opentelemetry/api 1.9.1; sdk-trace-node/resources 2.12.0; exporter-trace-otlp-http 0.223.0; semantic-conventions 1.45.0 (2026-11-09) | stable API 1.x/SDK 2.x; experimental exporter 0.x; fixes only current line, no calendar | [OTel JS releases](https://github.com/open-telemetry/opentelemetry-js/releases) | bump together across all three apps; SDK 2.x and exporter 0.2xx share releases; exporter minor may break; run telemetry/tracing/platform tests; the SDK 3 line (api 1.10, exporter 0.300+, resources 3) is a manual migration that Dependabot ignores |
 | PostgreSQL | 17, postgres:17-alpine, image 17.11 | community 2029-11-08 | [version policy](https://www.postgresql.org/support/versioning/) | major follows tx02v2 Flexible Server contract; update Compose/CI/kind/harness together |
-| nginx web | stable 1.30, nginxinc/nginx-unprivileged:1.30.5-alpine3.24-slim | next stable 1.32, expected around April 2027 | [nginx](https://nginx.org/en/download.html) | next quarterly review after release |
+| nginx web | stable 1.30, nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim (2026-11-09; web/Dockerfile adds Alpine musl 1.2.6-r3 and zlib 1.4-r0 until an upstream rebuild) | next stable 1.32, expected around April 2027 | [nginx](https://nginx.org/en/download.html) | next quarterly review after release |
 | Alpine build/web runtime | 3.24 | approximately 2028-05 | [releases](https://alpinelinux.org/releases/) | follow node/nginx-unprivileged digests |
 | Distroless API | nodejs24-debian13:nonroot | Debian 13 security approximately 2028-08 and Node.js 24 | [distroless](https://github.com/GoogleContainerTools/distroless) | do not revert to debian12, which stopped at Node 24.14.0 |
 | Kubernetes kind/kubectl/schemas and AKS | 1.36; node v1.36.4, kubectl 1.36.5 | AKS end 2027-06-30, 12 months from June 2026 GA; LTS through 2028-06 | [AKS versions](https://learn.microsoft.com/azure/aks/supported-kubernetes-versions), [Kubernetes](https://kubernetes.io/releases/) | coordinate tx02v2 minor changes as contract changes; section 5.5 |
@@ -121,6 +121,9 @@ coordinated with dx01v2/dx03v2.
 
 1. Read trivy-image:* package, installed version and fixed version.
 2. Alpine/Debian: refresh base digest (5.4); if unavailable, wait for rebuild or choose another tag.
+   When the distribution already ships the fix but the upstream image was not rebuilt, the runtime
+   stage may install the fixed packages at exact versions as a temporary, commented step; delete it
+   at the first digest that contains them (web/Dockerfile since 2026-11-09: musl 1.2.6-r3, zlib 1.4-r0).
 3. npm: update dependency (5.2); if transitive, use an exact root package.json overrides entry
    explained in the PR.
 4. No applicable fix and accepted risk: temporary exception (5.9/GUARDRAILS.md).
