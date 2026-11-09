@@ -27,7 +27,7 @@ All notable changes to this project are documented here. The format follows
     ranges until the migration is done by hand in the three apps.
   - CodeQL Action `init`/`analyze` pinned to the v4.39.3 commit (the old pin was the tag object
     of v4.39.0, not its commit).
-  - `deploy/local/tx02v2.ref` pins the merged tx02v2 round commit.
+  - `deploy/local/tx02v2.ref` pins tx02v2#22 (`e0dc574`), the merged tx02v2 round commit.
 
 ### Documentation
 
